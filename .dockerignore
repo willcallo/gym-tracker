@@ -1,0 +1,25 @@
+# Build artifacts — recreated inside Docker
+node_modules
+.next
+
+# Local database — must NOT be baked into the image
+gym.db
+gym.db-shm
+gym.db-wal
+
+# Secrets
+.env
+.env.local
+.env*.local
+
+# Dev/OS noise
+.DS_Store
+*.pem
+npm-debug.log*
+
+# Git
+.git
+.gitignore
+
+# TypeScript cache
+*.tsbuildinfo
