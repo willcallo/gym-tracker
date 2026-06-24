@@ -53,7 +53,7 @@ async function initSchema(): Promise<void> {
     CREATE TABLE IF NOT EXISTS sets (
       id SERIAL PRIMARY KEY,
       session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-      exercise_id INTEGER NOT NULL REFERENCES exercises(id),
+      exercise_id INTEGER NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
       set_number INTEGER NOT NULL,
       reps INTEGER NOT NULL,
       weight DOUBLE PRECISION,
@@ -79,84 +79,6 @@ async function initSchema(): Promise<void> {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
-
-  const { rows } = await pool.query('SELECT COUNT(*) AS count FROM exercises');
-  if (Number(rows[0].count) === 0) await seedExercises();
-}
-
-async function seedExercises(): Promise<void> {
-  const exercises: [string, number, string, string | null][] = [
-    ['Bench Press', 0, 'chest', 'triceps'],
-    ['Incline Bench Press', 0, 'chest', 'shoulders'],
-    ['Decline Bench Press', 0, 'chest', 'triceps'],
-    ['Dumbbell Fly', 0, 'chest', null],
-    ['Cable Fly', 0, 'chest', null],
-    ['Push-Up', 1, 'chest', 'triceps'],
-    ['Overhead Press', 0, 'shoulders', 'triceps'],
-    ['Dumbbell Lateral Raise', 0, 'shoulders', null],
-    ['Front Raise', 0, 'shoulders', null],
-    ['Face Pull', 0, 'upper back', 'shoulders'],
-    ['Dip', 1, 'triceps', 'chest'],
-    ['Tricep Pushdown', 0, 'triceps', null],
-    ['Close Grip Bench Press', 0, 'triceps', 'chest'],
-    ['Skull Crusher', 0, 'triceps', null],
-    ['Barbell Curl', 0, 'biceps', null],
-    ['Dumbbell Curl', 0, 'biceps', null],
-    ['Hammer Curl', 0, 'biceps', null],
-    ['Preacher Curl', 0, 'biceps', null],
-    ['Chin-Up', 1, 'biceps', 'lats'],
-    ['Pull-Up', 1, 'lats', 'biceps'],
-    ['Lat Pulldown', 0, 'lats', 'biceps'],
-    ['Straight Arm Pulldown', 0, 'lats', null],
-    ['Seated Cable Row', 0, 'upper back', 'biceps'],
-    ['Barbell Row', 0, 'upper back', 'biceps'],
-    ['Dumbbell Row', 0, 'upper back', 'biceps'],
-    ['Shrug', 0, 'upper back', null],
-    ['Good Morning', 0, 'lower back', 'hamstrings'],
-    ['Back Extension', 1, 'lower back', 'glutes'],
-    ['Squat', 0, 'quads', 'glutes'],
-    ['Front Squat', 0, 'quads', null],
-    ['Leg Press', 0, 'quads', 'glutes'],
-    ['Leg Extension', 0, 'quads', null],
-    ['Bulgarian Split Squat', 0, 'quads', 'glutes'],
-    ['Hack Squat', 0, 'quads', 'glutes'],
-    ['Deadlift', 0, 'hamstrings', 'lower back'],
-    ['Romanian Deadlift', 0, 'hamstrings', 'glutes'],
-    ['Leg Curl', 0, 'hamstrings', null],
-    ['Nordic Curl', 1, 'hamstrings', null],
-    ['Hip Thrust', 0, 'glutes', 'hamstrings'],
-    ['Glute Bridge', 1, 'glutes', null],
-    ['Cable Kickback', 0, 'glutes', null],
-    ['Standing Calf Raise', 0, 'calves', null],
-    ['Seated Calf Raise', 0, 'calves', null],
-    ['Plank', 1, 'core', null],
-    ['Ab Wheel', 1, 'core', null],
-    ['Hanging Leg Raise', 1, 'core', null],
-    ['Cable Crunch', 0, 'core', null],
-    ['Russian Twist', 1, 'core', null],
-    ['Running', 1, 'cardio', null],
-    ['Cycling', 1, 'cardio', null],
-    ['Rowing Machine', 1, 'cardio', 'upper back'],
-    ['Jump Rope', 1, 'cardio', 'calves'],
-  ];
-
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    for (const [name, bw, pm, sm] of exercises) {
-      await client.query(
-        `INSERT INTO exercises (name, is_bodyweight, primary_muscle, secondary_muscle)
-         VALUES ($1, $2, $3, $4) ON CONFLICT (name) DO NOTHING`,
-        [name, bw, pm, sm]
-      );
-    }
-    await client.query('COMMIT');
-  } catch (e) {
-    await client.query('ROLLBACK');
-    throw e;
-  } finally {
-    client.release();
-  }
 }
 
 // ── Exercises ────────────────────────────────────────────────
@@ -165,6 +87,12 @@ export async function getAllExercises(): Promise<Exercise[]> {
   await ensureInit();
   const { rows } = await pool.query('SELECT * FROM exercises ORDER BY name ASC');
   return rows as Exercise[];
+}
+
+export async function deleteExercise(id: number): Promise<boolean> {
+  await ensureInit();
+  const { rowCount } = await pool.query('DELETE FROM exercises WHERE id = $1', [id]);
+  return (rowCount ?? 0) > 0;
 }
 
 export async function createExercise(
@@ -446,23 +374,24 @@ export async function setUserSettings(bodyweight: number | null, age: number | n
 
 // ── Body Stats ────────────────────────────────────────────────
 
-export async function getExerciseMaxes(
-  names: string[]
-): Promise<Map<string, { maxWeight: number | null; maxReps: number }>> {
-  if (names.length === 0) return new Map();
+// Returns max weight (weighted exercises) and max reps (bodyweight exercises)
+// keyed by primary_muscle, so tiers work with any user-created exercise names.
+export async function getMaxesByMuscleGroup(): Promise<Map<string, { maxWeight: number | null; maxReps: number }>> {
   await ensureInit();
   const { rows } = await pool.query(
-    `SELECT e.name, MAX(s.weight) AS max_weight, MAX(s.reps) AS max_reps
-     FROM sets s JOIN exercises e ON s.exercise_id = e.id
-     WHERE e.name = ANY($1)
-     GROUP BY e.name`,
-    [names]
+    `SELECT
+       e.primary_muscle,
+       MAX(CASE WHEN e.is_bodyweight = 0 AND s.weight IS NOT NULL THEN s.weight ELSE NULL END) AS max_weight,
+       MAX(CASE WHEN e.is_bodyweight = 1 THEN s.reps ELSE NULL END) AS max_reps
+     FROM sets s
+     JOIN exercises e ON s.exercise_id = e.id
+     GROUP BY e.primary_muscle`
   );
   const map = new Map<string, { maxWeight: number | null; maxReps: number }>();
   for (const row of rows) {
-    map.set(row.name as string, {
+    map.set(row.primary_muscle as string, {
       maxWeight: row.max_weight != null ? Number(row.max_weight) : null,
-      maxReps: Number(row.max_reps),
+      maxReps: row.max_reps != null ? Number(row.max_reps) : 0,
     });
   }
   return map;
