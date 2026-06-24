@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 import { getUserSettings, getExerciseMaxes } from '@/lib/db';
 import { MUSCLE_STANDARDS, computeMuscleTiers, TIERS } from '@/lib/strengthStandards';
 import BodyMap, { TIER_COLORS, TIER_TEXT } from '../components/BodyMap';
@@ -9,8 +11,8 @@ const RANKED_MUSCLES = [
   'quads', 'hamstrings', 'glutes', 'calves', 'core',
 ] as const;
 
-export default function BodyPage() {
-  const settings = getUserSettings();
+export default async function BodyPage() {
+  const settings = await getUserSettings();
 
   if (!settings.bodyweight) {
     return (
@@ -40,7 +42,7 @@ export default function BodyPage() {
       )
     ),
   ];
-  const maxes = getExerciseMaxes(allNames);
+  const maxes = await getExerciseMaxes(allNames);
   const muscleTiers = computeMuscleTiers(maxes, settings.bodyweight);
   const rankedCount = Object.keys(muscleTiers).length;
 
@@ -59,7 +61,6 @@ export default function BodyPage() {
 
       <BodyMap muscleTiers={muscleTiers} />
 
-      {/* Tier legend */}
       <div className="rounded-xl border border-gray-800 bg-gray-900 p-4">
         <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">Tier Legend</p>
         <div className="grid grid-cols-3 gap-2">
@@ -77,7 +78,6 @@ export default function BodyPage() {
         </div>
       </div>
 
-      {/* Per-muscle breakdown */}
       <div className="rounded-xl border border-gray-800 bg-gray-900 overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-800">
           <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Muscle Breakdown</p>

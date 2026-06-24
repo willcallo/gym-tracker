@@ -9,11 +9,11 @@ export async function GET(
     const exerciseId = parseInt(exercise);
     if (isNaN(exerciseId)) return Response.json({ error: 'Invalid exercise id' }, { status: 400 });
 
-    const exercises = getAllExercises();
+    const exercises = await getAllExercises();
     const ex = exercises.find((e) => e.id === exerciseId);
     if (!ex) return Response.json({ error: 'Exercise not found' }, { status: 404 });
 
-    const progress = getProgressForExercise(exerciseId);
+    const progress = await getProgressForExercise(exerciseId);
     return Response.json({ exercise: ex, progress });
   } catch (e) {
     return Response.json({ error: String(e) }, { status: 500 });

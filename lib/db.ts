@@ -1,5 +1,4 @@
-import Database from 'better-sqlite3';
-import path from 'path';
+import { Pool, types } from 'pg';
 import type {
   Exercise,
   Session,
@@ -11,193 +10,220 @@ import type {
   MuscleGroup,
 } from './types';
 
-const DB_PATH = process.env.DB_PATH ?? path.join(process.cwd(), 'gym.db');
+// Return TIMESTAMP/TIMESTAMPTZ columns as ISO strings rather than Date objects
+types.setTypeParser(1114, (str: string) => new Date(str).toISOString());
+types.setTypeParser(1184, (str: string) => new Date(str).toISOString());
 
-let _db: Database.Database | null = null;
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
+  max: 10,
+});
 
-function getDb(): Database.Database {
-  if (_db) return _db;
-  _db = new Database(DB_PATH);
-  _db.pragma('journal_mode = WAL');
-  _db.pragma('foreign_keys = ON');
-  initSchema(_db);
-  return _db;
+// Lazy init: runs once per process (cold start), reused on warm requests
+let initPromise: Promise<void> | null = null;
+function ensureInit(): Promise<void> {
+  if (!initPromise) initPromise = initSchema();
+  return initPromise;
 }
 
-function initSchema(db: Database.Database): void {
-  db.exec(`
+async function initSchema(): Promise<void> {
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS exercises (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,
       is_bodyweight INTEGER NOT NULL DEFAULT 0,
       primary_muscle TEXT NOT NULL,
       secondary_muscle TEXT,
-      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS sessions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       date TEXT NOT NULL,
       label TEXT,
       notes TEXT,
       coaching_note TEXT,
-      coaching_at TEXT,
-      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      coaching_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
     CREATE INDEX IF NOT EXISTS idx_sessions_date ON sessions(date);
 
     CREATE TABLE IF NOT EXISTS sets (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
       exercise_id INTEGER NOT NULL REFERENCES exercises(id),
       set_number INTEGER NOT NULL,
       reps INTEGER NOT NULL,
-      weight REAL,
+      weight DOUBLE PRECISION,
       is_bodyweight INTEGER NOT NULL DEFAULT 0,
-      rpe REAL,
-      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      rpe DOUBLE PRECISION,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
     CREATE INDEX IF NOT EXISTS idx_sets_session ON sets(session_id);
     CREATE INDEX IF NOT EXISTS idx_sets_exercise ON sets(exercise_id);
 
     CREATE TABLE IF NOT EXISTS dashboard_cache (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       summary TEXT NOT NULL,
       session_count INTEGER NOT NULL,
-      generated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS user_settings (
-      id INTEGER PRIMARY KEY,
-      bodyweight REAL,
+      id INTEGER PRIMARY KEY DEFAULT 1,
+      bodyweight DOUBLE PRECISION,
       age INTEGER,
-      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
 
-  const { count } = db.prepare('SELECT COUNT(*) as count FROM exercises').get() as { count: number };
-  if (count === 0) seedExercises(db);
+  const { rows } = await pool.query('SELECT COUNT(*) AS count FROM exercises');
+  if (Number(rows[0].count) === 0) await seedExercises();
 }
 
-function seedExercises(db: Database.Database): void {
-  const insert = db.prepare(
-    'INSERT INTO exercises (name, is_bodyweight, primary_muscle, secondary_muscle) VALUES (?, ?, ?, ?)'
-  );
-  const seed = db.transaction(() => {
-    const exercises: [string, number, string, string | null][] = [
-      ['Bench Press', 0, 'chest', 'triceps'],
-      ['Incline Bench Press', 0, 'chest', 'shoulders'],
-      ['Decline Bench Press', 0, 'chest', 'triceps'],
-      ['Dumbbell Fly', 0, 'chest', null],
-      ['Cable Fly', 0, 'chest', null],
-      ['Push-Up', 1, 'chest', 'triceps'],
-      ['Overhead Press', 0, 'shoulders', 'triceps'],
-      ['Dumbbell Lateral Raise', 0, 'shoulders', null],
-      ['Front Raise', 0, 'shoulders', null],
-      ['Face Pull', 0, 'upper back', 'shoulders'],
-      ['Dip', 1, 'triceps', 'chest'],
-      ['Tricep Pushdown', 0, 'triceps', null],
-      ['Close Grip Bench Press', 0, 'triceps', 'chest'],
-      ['Skull Crusher', 0, 'triceps', null],
-      ['Barbell Curl', 0, 'biceps', null],
-      ['Dumbbell Curl', 0, 'biceps', null],
-      ['Hammer Curl', 0, 'biceps', null],
-      ['Preacher Curl', 0, 'biceps', null],
-      ['Chin-Up', 1, 'biceps', 'lats'],
-      ['Pull-Up', 1, 'lats', 'biceps'],
-      ['Lat Pulldown', 0, 'lats', 'biceps'],
-      ['Straight Arm Pulldown', 0, 'lats', null],
-      ['Seated Cable Row', 0, 'upper back', 'biceps'],
-      ['Barbell Row', 0, 'upper back', 'biceps'],
-      ['Dumbbell Row', 0, 'upper back', 'biceps'],
-      ['Shrug', 0, 'upper back', null],
-      ['Good Morning', 0, 'lower back', 'hamstrings'],
-      ['Back Extension', 1, 'lower back', 'glutes'],
-      ['Squat', 0, 'quads', 'glutes'],
-      ['Front Squat', 0, 'quads', null],
-      ['Leg Press', 0, 'quads', 'glutes'],
-      ['Leg Extension', 0, 'quads', null],
-      ['Bulgarian Split Squat', 0, 'quads', 'glutes'],
-      ['Hack Squat', 0, 'quads', 'glutes'],
-      ['Deadlift', 0, 'hamstrings', 'lower back'],
-      ['Romanian Deadlift', 0, 'hamstrings', 'glutes'],
-      ['Leg Curl', 0, 'hamstrings', null],
-      ['Nordic Curl', 1, 'hamstrings', null],
-      ['Hip Thrust', 0, 'glutes', 'hamstrings'],
-      ['Glute Bridge', 1, 'glutes', null],
-      ['Cable Kickback', 0, 'glutes', null],
-      ['Standing Calf Raise', 0, 'calves', null],
-      ['Seated Calf Raise', 0, 'calves', null],
-      ['Plank', 1, 'core', null],
-      ['Ab Wheel', 1, 'core', null],
-      ['Hanging Leg Raise', 1, 'core', null],
-      ['Cable Crunch', 0, 'core', null],
-      ['Russian Twist', 1, 'core', null],
-      ['Running', 1, 'cardio', null],
-      ['Cycling', 1, 'cardio', null],
-      ['Rowing Machine', 1, 'cardio', 'upper back'],
-      ['Jump Rope', 1, 'cardio', 'calves'],
-    ];
-    for (const [name, bw, pm, sm] of exercises) insert.run(name, bw, pm, sm);
-  });
-  seed();
+async function seedExercises(): Promise<void> {
+  const exercises: [string, number, string, string | null][] = [
+    ['Bench Press', 0, 'chest', 'triceps'],
+    ['Incline Bench Press', 0, 'chest', 'shoulders'],
+    ['Decline Bench Press', 0, 'chest', 'triceps'],
+    ['Dumbbell Fly', 0, 'chest', null],
+    ['Cable Fly', 0, 'chest', null],
+    ['Push-Up', 1, 'chest', 'triceps'],
+    ['Overhead Press', 0, 'shoulders', 'triceps'],
+    ['Dumbbell Lateral Raise', 0, 'shoulders', null],
+    ['Front Raise', 0, 'shoulders', null],
+    ['Face Pull', 0, 'upper back', 'shoulders'],
+    ['Dip', 1, 'triceps', 'chest'],
+    ['Tricep Pushdown', 0, 'triceps', null],
+    ['Close Grip Bench Press', 0, 'triceps', 'chest'],
+    ['Skull Crusher', 0, 'triceps', null],
+    ['Barbell Curl', 0, 'biceps', null],
+    ['Dumbbell Curl', 0, 'biceps', null],
+    ['Hammer Curl', 0, 'biceps', null],
+    ['Preacher Curl', 0, 'biceps', null],
+    ['Chin-Up', 1, 'biceps', 'lats'],
+    ['Pull-Up', 1, 'lats', 'biceps'],
+    ['Lat Pulldown', 0, 'lats', 'biceps'],
+    ['Straight Arm Pulldown', 0, 'lats', null],
+    ['Seated Cable Row', 0, 'upper back', 'biceps'],
+    ['Barbell Row', 0, 'upper back', 'biceps'],
+    ['Dumbbell Row', 0, 'upper back', 'biceps'],
+    ['Shrug', 0, 'upper back', null],
+    ['Good Morning', 0, 'lower back', 'hamstrings'],
+    ['Back Extension', 1, 'lower back', 'glutes'],
+    ['Squat', 0, 'quads', 'glutes'],
+    ['Front Squat', 0, 'quads', null],
+    ['Leg Press', 0, 'quads', 'glutes'],
+    ['Leg Extension', 0, 'quads', null],
+    ['Bulgarian Split Squat', 0, 'quads', 'glutes'],
+    ['Hack Squat', 0, 'quads', 'glutes'],
+    ['Deadlift', 0, 'hamstrings', 'lower back'],
+    ['Romanian Deadlift', 0, 'hamstrings', 'glutes'],
+    ['Leg Curl', 0, 'hamstrings', null],
+    ['Nordic Curl', 1, 'hamstrings', null],
+    ['Hip Thrust', 0, 'glutes', 'hamstrings'],
+    ['Glute Bridge', 1, 'glutes', null],
+    ['Cable Kickback', 0, 'glutes', null],
+    ['Standing Calf Raise', 0, 'calves', null],
+    ['Seated Calf Raise', 0, 'calves', null],
+    ['Plank', 1, 'core', null],
+    ['Ab Wheel', 1, 'core', null],
+    ['Hanging Leg Raise', 1, 'core', null],
+    ['Cable Crunch', 0, 'core', null],
+    ['Russian Twist', 1, 'core', null],
+    ['Running', 1, 'cardio', null],
+    ['Cycling', 1, 'cardio', null],
+    ['Rowing Machine', 1, 'cardio', 'upper back'],
+    ['Jump Rope', 1, 'cardio', 'calves'],
+  ];
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const [name, bw, pm, sm] of exercises) {
+      await client.query(
+        `INSERT INTO exercises (name, is_bodyweight, primary_muscle, secondary_muscle)
+         VALUES ($1, $2, $3, $4) ON CONFLICT (name) DO NOTHING`,
+        [name, bw, pm, sm]
+      );
+    }
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 // ── Exercises ────────────────────────────────────────────────
 
-export function getAllExercises(): Exercise[] {
-  return getDb().prepare('SELECT * FROM exercises ORDER BY name ASC').all() as Exercise[];
+export async function getAllExercises(): Promise<Exercise[]> {
+  await ensureInit();
+  const { rows } = await pool.query('SELECT * FROM exercises ORDER BY name ASC');
+  return rows as Exercise[];
 }
 
-export function createExercise(
+export async function createExercise(
   name: string,
   is_bodyweight: number,
   primary_muscle: MuscleGroup,
   secondary_muscle: MuscleGroup | null
-): Exercise {
-  return getDb()
-    .prepare(
-      'INSERT INTO exercises (name, is_bodyweight, primary_muscle, secondary_muscle) VALUES (?, ?, ?, ?) RETURNING *'
-    )
-    .get(name, is_bodyweight, primary_muscle, secondary_muscle) as Exercise;
+): Promise<Exercise> {
+  await ensureInit();
+  const { rows } = await pool.query(
+    'INSERT INTO exercises (name, is_bodyweight, primary_muscle, secondary_muscle) VALUES ($1, $2, $3, $4) RETURNING *',
+    [name, is_bodyweight, primary_muscle, secondary_muscle]
+  );
+  return rows[0] as Exercise;
 }
 
 // ── Sessions ─────────────────────────────────────────────────
 
-export function getAllSessions(): Session[] {
-  return getDb()
-    .prepare('SELECT * FROM sessions ORDER BY date DESC, created_at DESC')
-    .all() as Session[];
+export async function getAllSessions(): Promise<Session[]> {
+  await ensureInit();
+  const { rows } = await pool.query(
+    'SELECT * FROM sessions ORDER BY date DESC, created_at DESC'
+  );
+  return rows as Session[];
 }
 
-export function getRecentSessions(limit: number): Session[] {
-  return getDb()
-    .prepare('SELECT * FROM sessions ORDER BY date DESC, created_at DESC LIMIT ?')
-    .all(limit) as Session[];
+export async function getRecentSessions(limit: number): Promise<Session[]> {
+  await ensureInit();
+  const { rows } = await pool.query(
+    'SELECT * FROM sessions ORDER BY date DESC, created_at DESC LIMIT $1',
+    [limit]
+  );
+  return rows as Session[];
 }
 
-export function getSessionById(id: number): SessionWithSets | null {
-  const db = getDb();
-  const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(id) as Session | undefined;
-  if (!session) return null;
+export async function getSessionById(id: number): Promise<SessionWithSets | null> {
+  await ensureInit();
+  const { rows: sessionRows } = await pool.query(
+    'SELECT * FROM sessions WHERE id = $1',
+    [id]
+  );
+  if (!sessionRows[0]) return null;
+  const session = sessionRows[0] as Session;
 
-  const rawSets = db
-    .prepare(
-      `SELECT s.id, s.session_id, s.exercise_id, s.set_number, s.reps, s.weight,
-              s.is_bodyweight, s.rpe, s.created_at,
-              e.name as exercise_name, e.primary_muscle, e.secondary_muscle,
-              e.is_bodyweight as is_bodyweight_exercise
-       FROM sets s
-       JOIN exercises e ON s.exercise_id = e.id
-       WHERE s.session_id = ?
-       ORDER BY s.exercise_id, s.set_number`
-    )
-    .all(id) as ExerciseSetRow[];
+  const { rows: rawSets } = await pool.query(
+    `SELECT s.id, s.session_id, s.exercise_id, s.set_number, s.reps, s.weight,
+            s.is_bodyweight, s.rpe, s.created_at,
+            e.name AS exercise_name, e.primary_muscle, e.secondary_muscle,
+            e.is_bodyweight AS is_bodyweight_exercise
+     FROM sets s
+     JOIN exercises e ON s.exercise_id = e.id
+     WHERE s.session_id = $1
+     ORDER BY s.exercise_id, s.set_number`,
+    [id]
+  );
+  const rows = rawSets as ExerciseSetRow[];
 
   const exerciseMap = new Map<number, ExerciseGroup>();
-  for (const row of rawSets) {
+  for (const row of rows) {
     if (!exerciseMap.has(row.exercise_id)) {
       exerciseMap.set(row.exercise_id, {
         exercise_id: row.exercise_id,
@@ -221,18 +247,20 @@ export function getSessionById(id: number): SessionWithSets | null {
   return { ...session, exercises: Array.from(exerciseMap.values()) };
 }
 
-export function createSession(date: string, label?: string, notes?: string): Session {
-  return getDb()
-    .prepare('INSERT INTO sessions (date, label, notes) VALUES (?, ?, ?) RETURNING *')
-    .get(date, label ?? null, notes ?? null) as Session;
+export async function createSession(date: string, label?: string, notes?: string): Promise<Session> {
+  await ensureInit();
+  const { rows } = await pool.query(
+    'INSERT INTO sessions (date, label, notes) VALUES ($1, $2, $3) RETURNING *',
+    [date, label ?? null, notes ?? null]
+  );
+  return rows[0] as Session;
 }
 
-export function updateSessionCoaching(id: number, coaching_note: string): void {
-  getDb()
-    .prepare(
-      "UPDATE sessions SET coaching_note = ?, coaching_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?"
-    )
-    .run(coaching_note, id);
+export async function updateSessionCoaching(id: number, coaching_note: string): Promise<void> {
+  await pool.query(
+    'UPDATE sessions SET coaching_note = $1, coaching_at = NOW() WHERE id = $2',
+    [coaching_note, id]
+  );
 }
 
 // ── Sets ─────────────────────────────────────────────────────
@@ -246,80 +274,106 @@ export interface SetInput {
   rpe: number | null;
 }
 
-export function addSets(session_id: number, sets: SetInput[]): void {
-  const db = getDb();
-  const insert = db.prepare(
-    'INSERT INTO sets (session_id, exercise_id, set_number, reps, weight, is_bodyweight, rpe) VALUES (?, ?, ?, ?, ?, ?, ?)'
-  );
-  db.transaction(() => {
-    for (const s of sets) insert.run(session_id, s.exercise_id, s.set_number, s.reps, s.weight, s.is_bodyweight, s.rpe);
-  })();
+export async function addSets(session_id: number, sets: SetInput[]): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const s of sets) {
+      await client.query(
+        'INSERT INTO sets (session_id, exercise_id, set_number, reps, weight, is_bodyweight, rpe) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+        [session_id, s.exercise_id, s.set_number, s.reps, s.weight, s.is_bodyweight, s.rpe]
+      );
+    }
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 // ── Progress ─────────────────────────────────────────────────
 
-export function getProgressForExercise(exercise_id: number): ProgressPoint[] {
-  const rows = getDb()
-    .prepare(
-      `SELECT sess.date, sess.id as session_id,
-              MAX(s.weight) as max_weight,
-              SUM(CASE WHEN s.is_bodyweight = 1 THEN s.reps ELSE s.reps * COALESCE(s.weight, 0) END) as volume
-       FROM sets s
-       JOIN sessions sess ON s.session_id = sess.id
-       WHERE s.exercise_id = ?
-       GROUP BY sess.id
-       ORDER BY sess.date ASC`
-    )
-    .all(exercise_id) as { date: string; session_id: number; max_weight: number | null; volume: number }[];
+export async function getProgressForExercise(exercise_id: number): Promise<ProgressPoint[]> {
+  await ensureInit();
+  const { rows } = await pool.query(
+    `SELECT sess.date, sess.id AS session_id,
+            MAX(s.weight) AS max_weight,
+            SUM(CASE WHEN s.is_bodyweight = 1 THEN s.reps ELSE s.reps * COALESCE(s.weight, 0) END) AS volume
+     FROM sets s
+     JOIN sessions sess ON s.session_id = sess.id
+     WHERE s.exercise_id = $1
+     GROUP BY sess.id
+     ORDER BY sess.date ASC`,
+    [exercise_id]
+  );
 
   let runningMax: number | null = null;
   return rows.map((row) => {
-    const isPR = row.max_weight !== null && (runningMax === null || row.max_weight > runningMax);
-    if (isPR && row.max_weight !== null) runningMax = row.max_weight;
-    return { ...row, isPR };
+    const maxWeight = row.max_weight !== null ? Number(row.max_weight) : null;
+    const volume = Number(row.volume);
+    const isPR = maxWeight !== null && (runningMax === null || maxWeight > runningMax);
+    if (isPR && maxWeight !== null) runningMax = maxWeight;
+    return { date: row.date as string, session_id: Number(row.session_id), max_weight: maxWeight, volume, isPR };
   });
 }
 
-export function getAllPRs(): PRRecord[] {
-  return getDb()
-    .prepare(
-      `SELECT e.id as exercise_id, e.name as exercise_name, e.primary_muscle,
-              MAX(s.weight) as max_weight, sess.date as session_date
+export async function getAllPRs(): Promise<PRRecord[]> {
+  await ensureInit();
+  const { rows } = await pool.query(
+    `WITH ranked AS (
+       SELECT
+         s.exercise_id,
+         s.weight AS max_weight,
+         sess.date AS session_date,
+         ROW_NUMBER() OVER (PARTITION BY s.exercise_id ORDER BY s.weight DESC, sess.date DESC) AS rn
        FROM sets s
-       JOIN exercises e ON s.exercise_id = e.id
        JOIN sessions sess ON s.session_id = sess.id
        WHERE s.weight IS NOT NULL
-       GROUP BY e.id
-       ORDER BY e.primary_muscle, e.name`
-    )
-    .all() as PRRecord[];
+     )
+     SELECT e.id AS exercise_id, e.name AS exercise_name, e.primary_muscle,
+            r.max_weight, r.session_date
+     FROM ranked r
+     JOIN exercises e ON e.id = r.exercise_id
+     WHERE r.rn = 1
+     ORDER BY e.primary_muscle, e.name`
+  );
+  return rows.map((r) => ({ ...r, max_weight: Number(r.max_weight) })) as PRRecord[];
 }
 
-export function getExercisePR(exercise_id: number): number | null {
-  const row = getDb()
-    .prepare('SELECT MAX(weight) as max_weight FROM sets WHERE exercise_id = ? AND weight IS NOT NULL')
-    .get(exercise_id) as { max_weight: number | null };
-  return row.max_weight;
+export async function getExercisePR(exercise_id: number): Promise<number | null> {
+  await ensureInit();
+  const { rows } = await pool.query(
+    'SELECT MAX(weight) AS max_weight FROM sets WHERE exercise_id = $1 AND weight IS NOT NULL',
+    [exercise_id]
+  );
+  const val = rows[0]?.max_weight;
+  return val != null ? Number(val) : null;
 }
 
 // ── Dashboard Cache ───────────────────────────────────────────
 
-export function getDashboardCache(): { summary: string; session_count: number } | null {
-  return (
-    (getDb()
-      .prepare('SELECT summary, session_count FROM dashboard_cache ORDER BY id DESC LIMIT 1')
-      .get() as { summary: string; session_count: number } | undefined) ?? null
+export async function getDashboardCache(): Promise<{ summary: string; session_count: number } | null> {
+  await ensureInit();
+  const { rows } = await pool.query(
+    'SELECT summary, session_count FROM dashboard_cache ORDER BY id DESC LIMIT 1'
+  );
+  return rows[0] ?? null;
+}
+
+export async function setDashboardCache(summary: string, session_count: number): Promise<void> {
+  await pool.query('DELETE FROM dashboard_cache');
+  await pool.query(
+    'INSERT INTO dashboard_cache (summary, session_count) VALUES ($1, $2)',
+    [summary, session_count]
   );
 }
 
-export function setDashboardCache(summary: string, session_count: number): void {
-  const db = getDb();
-  db.prepare('DELETE FROM dashboard_cache').run();
-  db.prepare('INSERT INTO dashboard_cache (summary, session_count) VALUES (?, ?)').run(summary, session_count);
-}
-
-export function getSessionCount(): number {
-  return (getDb().prepare('SELECT COUNT(*) as count FROM sessions').get() as { count: number }).count;
+export async function getSessionCount(): Promise<number> {
+  await ensureInit();
+  const { rows } = await pool.query('SELECT COUNT(*) AS count FROM sessions');
+  return Number(rows[0].count);
 }
 
 // ── Coaching Context ──────────────────────────────────────────
@@ -330,96 +384,106 @@ export interface CoachingSessionData {
   newPRs: string[];
 }
 
-export function buildCoachingData(sessionId: number): CoachingSessionData | null {
-  const db = getDb();
-  const session = getSessionById(sessionId);
+export async function buildCoachingData(sessionId: number): Promise<CoachingSessionData | null> {
+  await ensureInit();
+  const session = await getSessionById(sessionId);
   if (!session) return null;
 
   const newPRs: string[] = [];
   for (const exGroup of session.exercises) {
     if (exGroup.is_bodyweight) continue;
-    const prev = db
-      .prepare('SELECT MAX(s.weight) as max_weight FROM sets s WHERE s.exercise_id = ? AND s.session_id != ?')
-      .get(exGroup.exercise_id, sessionId) as { max_weight: number | null };
-
+    const { rows } = await pool.query(
+      'SELECT MAX(s.weight) AS max_weight FROM sets s WHERE s.exercise_id = $1 AND s.session_id != $2',
+      [exGroup.exercise_id, sessionId]
+    );
+    const prevMax = rows[0]?.max_weight != null ? Number(rows[0].max_weight) : null;
     const weights = exGroup.sets.map((s) => s.weight ?? 0).filter((w) => w > 0);
     if (!weights.length) continue;
     const sessionMax = Math.max(...weights);
-    if (prev.max_weight === null || sessionMax > prev.max_weight) {
+    if (prevMax === null || sessionMax > prevMax) {
       newPRs.push(`${exGroup.exercise_name} (${sessionMax}kg)`);
     }
   }
 
-  const recentSessions = db
-    .prepare('SELECT id, date, label FROM sessions WHERE id != ? ORDER BY date DESC, created_at DESC LIMIT 5')
-    .all(sessionId) as { id: number; date: string; label: string | null }[];
+  const { rows: recentRows } = await pool.query(
+    'SELECT id, date, label FROM sessions WHERE id != $1 ORDER BY date DESC, created_at DESC LIMIT 5',
+    [sessionId]
+  );
 
-  const recentHistory = recentSessions.map((s) => {
-    const rows = db
-      .prepare(
-        `SELECT e.primary_muscle, COUNT(*) as cnt
+  const recentHistory = await Promise.all(
+    recentRows.map(async (s: { id: number; date: string; label: string | null }) => {
+      const { rows: muscleRows } = await pool.query(
+        `SELECT e.primary_muscle, COUNT(*) AS cnt
          FROM sets st JOIN exercises e ON st.exercise_id = e.id
-         WHERE st.session_id = ? GROUP BY e.primary_muscle`
-      )
-      .all(s.id) as { primary_muscle: string; cnt: number }[];
-    const muscleCounts: Record<string, number> = {};
-    for (const r of rows) muscleCounts[r.primary_muscle] = r.cnt;
-    return { date: s.date, label: s.label, muscleCounts };
-  });
+         WHERE st.session_id = $1 GROUP BY e.primary_muscle`,
+        [s.id]
+      );
+      const muscleCounts: Record<string, number> = {};
+      for (const r of muscleRows) muscleCounts[r.primary_muscle] = Number(r.cnt);
+      return { date: s.date, label: s.label, muscleCounts };
+    })
+  );
 
   return { session, recentHistory, newPRs };
 }
 
 // ── User Settings ─────────────────────────────────────────────
 
-export function getUserSettings(): { bodyweight: number | null; age: number | null } {
-  const row = getDb()
-    .prepare('SELECT bodyweight, age FROM user_settings LIMIT 1')
-    .get() as { bodyweight: number | null; age: number | null } | undefined;
-  return row ?? { bodyweight: null, age: null };
+export async function getUserSettings(): Promise<{ bodyweight: number | null; age: number | null }> {
+  await ensureInit();
+  const { rows } = await pool.query('SELECT bodyweight, age FROM user_settings LIMIT 1');
+  return rows[0] ?? { bodyweight: null, age: null };
 }
 
-export function setUserSettings(bodyweight: number | null, age: number | null): void {
-  const db = getDb();
-  db.prepare('DELETE FROM user_settings').run();
-  db.prepare('INSERT INTO user_settings (bodyweight, age) VALUES (?, ?)').run(bodyweight, age);
+export async function setUserSettings(bodyweight: number | null, age: number | null): Promise<void> {
+  await ensureInit();
+  await pool.query(
+    `INSERT INTO user_settings (id, bodyweight, age) VALUES (1, $1, $2)
+     ON CONFLICT (id) DO UPDATE SET bodyweight = $1, age = $2, updated_at = NOW()`,
+    [bodyweight, age]
+  );
 }
 
 // ── Body Stats ────────────────────────────────────────────────
 
-export function getExerciseMaxes(
+export async function getExerciseMaxes(
   names: string[]
-): Map<string, { maxWeight: number | null; maxReps: number }> {
+): Promise<Map<string, { maxWeight: number | null; maxReps: number }>> {
   if (names.length === 0) return new Map();
-  const db = getDb();
-  const placeholders = names.map(() => '?').join(',');
-  const rows = db
-    .prepare(
-      `SELECT e.name, MAX(s.weight) as max_weight, MAX(s.reps) as max_reps
-       FROM sets s JOIN exercises e ON s.exercise_id = e.id
-       WHERE e.name IN (${placeholders})
-       GROUP BY e.name`
-    )
-    .all(...names) as { name: string; max_weight: number | null; max_reps: number }[];
+  await ensureInit();
+  const { rows } = await pool.query(
+    `SELECT e.name, MAX(s.weight) AS max_weight, MAX(s.reps) AS max_reps
+     FROM sets s JOIN exercises e ON s.exercise_id = e.id
+     WHERE e.name = ANY($1)
+     GROUP BY e.name`,
+    [names]
+  );
   const map = new Map<string, { maxWeight: number | null; maxReps: number }>();
   for (const row of rows) {
-    map.set(row.name, { maxWeight: row.max_weight, maxReps: row.max_reps });
+    map.set(row.name as string, {
+      maxWeight: row.max_weight != null ? Number(row.max_weight) : null,
+      maxReps: Number(row.max_reps),
+    });
   }
   return map;
 }
 
-// ── Last Sets (for pre-filling WorkoutForm) ───────────────────
+// ── Last Sets ─────────────────────────────────────────────────
 
-export function getLastSets(): Record<number, { reps: number; weight: number | null }> {
-  const rows = getDb()
-    .prepare(
-      `SELECT exercise_id, reps, weight
-       FROM sets
-       WHERE rowid IN (SELECT MAX(rowid) FROM sets GROUP BY exercise_id)`
-    )
-    .all() as { exercise_id: number; reps: number; weight: number | null }[];
+export async function getLastSets(): Promise<Record<number, { reps: number; weight: number | null }>> {
+  await ensureInit();
+  const { rows } = await pool.query(
+    `SELECT exercise_id, reps, weight
+     FROM sets
+     WHERE id IN (SELECT MAX(id) FROM sets GROUP BY exercise_id)`
+  );
   const result: Record<number, { reps: number; weight: number | null }> = {};
-  for (const row of rows) result[row.exercise_id] = { reps: row.reps, weight: row.weight };
+  for (const row of rows) {
+    result[Number(row.exercise_id)] = {
+      reps: Number(row.reps),
+      weight: row.weight != null ? Number(row.weight) : null,
+    };
+  }
   return result;
 }
 
@@ -432,17 +496,22 @@ export interface DashboardData {
   sessionCount: number;
 }
 
-export function getDashboardData(): DashboardData {
-  const db = getDb();
-  const sessionCount = getSessionCount();
-  const prs = getAllPRs();
-  const cache = getDashboardCache();
+export async function getDashboardData(): Promise<DashboardData> {
+  await ensureInit();
 
-  const ids = db
-    .prepare('SELECT id FROM sessions ORDER BY date DESC, created_at DESC LIMIT 5')
-    .all() as { id: number }[];
+  const [sessionCount, prs, cache] = await Promise.all([
+    getSessionCount(),
+    getAllPRs(),
+    getDashboardCache(),
+  ]);
 
-  const recentSessions = ids.map((r) => getSessionById(r.id)).filter(Boolean) as SessionWithSets[];
+  const { rows: ids } = await pool.query(
+    'SELECT id FROM sessions ORDER BY date DESC, created_at DESC LIMIT 5'
+  );
+
+  const recentSessions = (
+    await Promise.all(ids.map((r: { id: number }) => getSessionById(r.id)))
+  ).filter(Boolean) as SessionWithSets[];
 
   return {
     recentSessions,

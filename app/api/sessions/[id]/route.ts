@@ -6,7 +6,7 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const session = getSessionById(parseInt(id));
+    const session = await getSessionById(parseInt(id));
     if (!session) return Response.json({ error: 'Not found' }, { status: 404 });
     return Response.json(session);
   } catch (e) {

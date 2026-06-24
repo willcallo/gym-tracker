@@ -1,7 +1,7 @@
 import { buildCoachingData, updateSessionCoaching } from '@/lib/db';
 import { anthropic } from '@/lib/anthropic';
 
-function buildPrompt(data: NonNullable<ReturnType<typeof buildCoachingData>>): string {
+function buildPrompt(data: NonNullable<Awaited<ReturnType<typeof buildCoachingData>>>): string {
   const { session, recentHistory, newPRs } = data;
 
   const sessionHeader = [
@@ -25,7 +25,6 @@ function buildPrompt(data: NonNullable<ReturnType<typeof buildCoachingData>>): s
     })
     .join('\n\n');
 
-  // Muscle set counts this session
   const muscleCounts: Record<string, number> = {};
   for (const ex of session.exercises) {
     muscleCounts[ex.primary_muscle] = (muscleCounts[ex.primary_muscle] ?? 0) + ex.sets.length;
@@ -34,7 +33,6 @@ function buildPrompt(data: NonNullable<ReturnType<typeof buildCoachingData>>): s
     .map(([m, n]) => `${m}: ${n}`)
     .join(' | ');
 
-  // Accumulated counts over last 5 sessions + today
   const accumulated: Record<string, number> = { ...muscleCounts };
   for (const h of recentHistory) {
     for (const [m, n] of Object.entries(h.muscleCounts)) {
@@ -42,7 +40,6 @@ function buildPrompt(data: NonNullable<ReturnType<typeof buildCoachingData>>): s
     }
   }
 
-  // Antagonist pair analysis
   const pairs: [string, string[]][] = [
     ['chest', ['lats', 'upper back']],
     ['shoulders', ['lats', 'upper back']],
@@ -82,8 +79,7 @@ ${exerciseLines}
 ### Muscle set counts (this session):
 ${muscleCountLine || 'none'}
 
-${newPRs.length > 0 ? `### New personal records:\n${newPRs.map((p) => `  ★ ${p}`).join('\n')}\n` : ''}
-### Recent history (last ${recentHistory.length} sessions):
+${newPRs.length > 0 ? `### New personal records:\n${newPRs.map((p) => `  ★ ${p}`).join('\n')}\n` : ''}### Recent history (last ${recentHistory.length} sessions):
 ${historyLines}
 
 ### Antagonist balance (accumulated — today + last ${recentHistory.length} sessions):
@@ -114,7 +110,7 @@ export async function POST(
       );
     }
 
-    const data = buildCoachingData(sessionId);
+    const data = await buildCoachingData(sessionId);
     if (!data) return Response.json({ error: 'Session not found' }, { status: 404 });
 
     const prompt = buildPrompt(data);
@@ -128,7 +124,7 @@ export async function POST(
     const coaching_note =
       message.content[0].type === 'text' ? message.content[0].text : 'Could not generate coaching note.';
 
-    updateSessionCoaching(sessionId, coaching_note);
+    await updateSessionCoaching(sessionId, coaching_note);
 
     return Response.json({ coaching_note });
   } catch (e) {

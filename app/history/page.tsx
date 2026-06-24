@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 import { getAllSessions, getSessionById } from '@/lib/db';
 import SessionCard from '../components/SessionCard';
 import CoachingNote from '../components/CoachingNote';
@@ -7,7 +9,7 @@ import type { SessionWithSets } from '@/lib/types';
 function groupByMonth(sessions: SessionWithSets[]): Map<string, SessionWithSets[]> {
   const map = new Map<string, SessionWithSets[]>();
   for (const s of sessions) {
-    const key = s.date.slice(0, 7); // YYYY-MM
+    const key = s.date.slice(0, 7);
     const list = map.get(key) ?? [];
     list.push(s);
     map.set(key, list);
@@ -23,8 +25,8 @@ function monthLabel(key: string) {
   });
 }
 
-export default function HistoryPage() {
-  const allSessions = getAllSessions();
+export default async function HistoryPage() {
+  const allSessions = await getAllSessions();
 
   if (allSessions.length === 0) {
     return (
@@ -37,9 +39,9 @@ export default function HistoryPage() {
     );
   }
 
-  const fullSessions = allSessions
-    .map((s) => getSessionById(s.id))
-    .filter(Boolean) as SessionWithSets[];
+  const fullSessions = (
+    await Promise.all(allSessions.map((s) => getSessionById(s.id)))
+  ).filter(Boolean) as SessionWithSets[];
 
   const byMonth = groupByMonth(fullSessions);
 

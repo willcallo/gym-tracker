@@ -1,13 +1,13 @@
 import { getUserSettings, setUserSettings } from '@/lib/db';
 
 export async function GET() {
-  return Response.json(getUserSettings());
+  return Response.json(await getUserSettings());
 }
 
 export async function PUT(request: Request) {
   try {
     const { bodyweight, age } = await request.json();
-    setUserSettings(
+    await setUserSettings(
       bodyweight != null ? Number(bodyweight) : null,
       age != null ? Number(age) : null
     );

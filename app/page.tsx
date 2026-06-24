@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 import { Suspense } from 'react';
 import Link from 'next/link';
 import { getDashboardData } from '@/lib/db';
@@ -39,13 +41,12 @@ function SummarySkeleton() {
   );
 }
 
-export default function DashboardPage() {
-  const { recentSessions, prs, sessionCount } = getDashboardData();
+export default async function DashboardPage() {
+  const { recentSessions, prs, sessionCount } = await getDashboardData();
   const prsByMuscle = groupPRsByMuscle(prs);
 
   return (
     <div className="space-y-8">
-      {/* Hero */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-100">Dashboard</h1>
@@ -72,12 +73,10 @@ export default function DashboardPage() {
         </div>
       ) : (
         <>
-          {/* AI summary — streams in via Suspense */}
           <Suspense fallback={<SummarySkeleton />}>
             <AISummary />
           </Suspense>
 
-          {/* Recent sessions */}
           <section>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide">Recent Sessions</h2>
@@ -92,7 +91,6 @@ export default function DashboardPage() {
             </div>
           </section>
 
-          {/* PRs */}
           {prs.length > 0 && (
             <section>
               <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-4">

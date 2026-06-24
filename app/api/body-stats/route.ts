@@ -2,7 +2,7 @@ import { getUserSettings, getExerciseMaxes } from '@/lib/db';
 import { MUSCLE_STANDARDS, computeMuscleTiers } from '@/lib/strengthStandards';
 
 export async function GET() {
-  const settings = getUserSettings();
+  const settings = await getUserSettings();
   if (!settings.bodyweight) {
     return Response.json({ muscleTiers: {}, settings });
   }
@@ -15,7 +15,7 @@ export async function GET() {
     ),
   ];
 
-  const maxes = getExerciseMaxes(allNames);
+  const maxes = await getExerciseMaxes(allNames);
   const muscleTiers = computeMuscleTiers(maxes, settings.bodyweight);
   return Response.json({ muscleTiers, settings });
 }

@@ -29,7 +29,7 @@ Write only the paragraph. No headers.`;
 }
 
 export async function getDashboardSummary(): Promise<string | null> {
-  const data = getDashboardData();
+  const data = await getDashboardData();
 
   if (data.cachedSummary) return data.cachedSummary;
   if (!data.recentSessions.length || !process.env.ANTHROPIC_API_KEY) return null;
@@ -41,7 +41,7 @@ export async function getDashboardSummary(): Promise<string | null> {
       messages: [{ role: 'user', content: buildSummaryPrompt(data.recentSessions, data.prs) }],
     });
     const summary = message.content[0].type === 'text' ? message.content[0].text : null;
-    if (summary) setDashboardCache(summary, data.sessionCount);
+    if (summary) await setDashboardCache(summary, data.sessionCount);
     return summary;
   } catch {
     return null;

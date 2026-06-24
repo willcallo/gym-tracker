@@ -1,9 +1,10 @@
+export const dynamic = 'force-dynamic';
+
 import { getAllExercises, getLastSets } from '@/lib/db';
 import WorkoutForm from '../components/WorkoutForm';
 
-export default function LogPage() {
-  const exercises = getAllExercises();
-  const lastSets = getLastSets();
+export default async function LogPage() {
+  const [exercises, lastSets] = await Promise.all([getAllExercises(), getLastSets()]);
 
   return (
     <div>

@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 import { getAllExercises, getProgressForExercise } from '@/lib/db';
 import ProgressChart from '../../components/ProgressChart';
 import Link from 'next/link';
@@ -12,20 +14,20 @@ export default async function ProgressPage({
   const exerciseId = parseInt(exercise);
   if (isNaN(exerciseId)) notFound();
 
-  const exercises = getAllExercises();
+  const exercises = await getAllExercises();
   const ex = exercises.find((e) => e.id === exerciseId);
   if (!ex) notFound();
 
-  const progress = getProgressForExercise(exerciseId);
+  const progress = await getProgressForExercise(exerciseId);
   const currentPR = progress.filter((p) => p.max_weight !== null).slice(-1)[0];
 
-  const allExercisesWithData = exercises.filter(
-    (e) => getProgressForExercise(e.id).length > 0
+  const progressByExercise = await Promise.all(
+    exercises.map(async (e) => ({ e, len: (await getProgressForExercise(e.id)).length }))
   );
+  const allExercisesWithData = progressByExercise.filter((x) => x.len > 0).map((x) => x.e);
 
   return (
     <div className="space-y-8">
-      {/* Header */}
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-100">{ex.name}</h1>
@@ -52,10 +54,8 @@ export default async function ProgressPage({
         )}
       </div>
 
-      {/* Chart */}
       <ProgressChart data={progress} exerciseName={ex.name} />
 
-      {/* Sessions history */}
       {progress.length > 0 && (
         <section>
           <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-4">Session History</h2>
@@ -96,7 +96,6 @@ export default async function ProgressPage({
         </section>
       )}
 
-      {/* Jump to other exercise */}
       {allExercisesWithData.length > 1 && (
         <section>
           <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">Other Exercises</h2>
