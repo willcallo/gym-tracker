@@ -301,8 +301,8 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
     for (const b of form.blocks) {
       const ex = byId.get(b.exerciseId);
       for (const s of b.sets) {
-        if (!repsOk(s.reps)) return `f-${s.id}-reps`;
         if (!ex?.is_bodyweight && !weightOk(s.weight)) return `f-${s.id}-weight`;
+        if (!repsOk(s.reps)) return `f-${s.id}-reps`;
         if (s.rpe && !rpeOk(s.rpe)) return `f-${s.id}-rpe`;
       }
     }
@@ -516,7 +516,7 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
         const hints = placeholdersFor(block, ex.last_sets);
         const cols = ex.is_bodyweight
           ? 'grid-cols-[1.75rem_1fr_4.5rem_2.75rem]'
-          : 'grid-cols-[1.75rem_1fr_1.35fr_4.5rem_2.75rem]';
+          : 'grid-cols-[1.75rem_1.35fr_1fr_4.5rem_2.75rem]';
 
         return (
           <div key={block.id} id={`block-${block.id}`} className="scroll-mt-4">
@@ -535,8 +535,8 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
 
               <div className={`grid ${cols} items-end gap-1.5 text-center text-xs font-medium text-gray-600`}>
                 <span>Set</span>
-                <span>Reps</span>
                 {!ex.is_bodyweight && <span>Weight (kg)</span>}
+                <span>Reps</span>
                 <span>RPE</span>
                 <span />
               </div>
@@ -547,19 +547,6 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
                 return (
                   <div key={s.id} className={`grid ${cols} items-center gap-1.5`}>
                     <span className="text-center text-base font-semibold text-gray-600">{i + 1}</span>
-                    <input
-                      id={`f-${s.id}-reps`}
-                      type="text"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      autoComplete="off"
-                      aria-label={`Reps, ${name}`}
-                      value={s.reps}
-                      placeholder={hint.reps}
-                      onFocus={(e) => onFieldFocus(e, block, s, 'reps', hint.reps)}
-                      onChange={(e) => setField(block.id, s.id, 'reps', e.target.value)}
-                      className={fieldCls(attempted && !repsOk(s.reps))}
-                    />
                     {!ex.is_bodyweight && (
                       <input
                         id={`f-${s.id}-weight`}
@@ -574,6 +561,19 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
                         className={fieldCls(attempted && !weightOk(s.weight))}
                       />
                     )}
+                    <input
+                      id={`f-${s.id}-reps`}
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      autoComplete="off"
+                      aria-label={`Reps, ${name}`}
+                      value={s.reps}
+                      placeholder={hint.reps}
+                      onFocus={(e) => onFieldFocus(e, block, s, 'reps', hint.reps)}
+                      onChange={(e) => setField(block.id, s.id, 'reps', e.target.value)}
+                      className={fieldCls(attempted && !repsOk(s.reps))}
+                    />
                     <input
                       id={`f-${s.id}-rpe`}
                       type="text"
