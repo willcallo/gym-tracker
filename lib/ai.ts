@@ -3,7 +3,7 @@ import { formatWeight } from './format';
 import type { CoachingContext, SummaryContext } from './db';
 import type { SessionWithSets } from './types';
 
-export const MODEL = 'claude-sonnet-5-5';
+const MODEL = 'claude-sonnet-5-5';
 
 export function aiEnabled(): boolean {
   return !!process.env.ANTHROPIC_API_KEY;
@@ -25,7 +25,7 @@ export async function generateText(prompt: string): Promise<string> {
 
 // ── Per-session coaching ─────────────────────────────────────
 
-export function findNewPRs(session: SessionWithSets, priorBest: CoachingContext['priorBest']): string[] {
+function findNewPRs(session: SessionWithSets, priorBest: CoachingContext['priorBest']): string[] {
   const prior = new Map(priorBest.map((p) => [p.exercise_id, p]));
   const prs: string[] = [];
   for (const ex of session.exercises) {

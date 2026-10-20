@@ -1,4 +1,4 @@
-export function parseDate(date: string): Date {
+function parseDate(date: string): Date {
   const [y, m, d] = date.split('-').map(Number);
   return new Date(y, m - 1, d);
 }

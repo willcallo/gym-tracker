@@ -7,7 +7,6 @@ import type {
   ExerciseWithLast,
   SessionInput,
   SessionWithSets,
-  SetValues,
   Settings,
   TrainingSummary,
 } from './types';
@@ -420,5 +419,3 @@ export async function saveTrainingSummary(summary: string, sessionCount: number)
     [summary, sessionCount]
   );
 }
-
-export type { SetValues };

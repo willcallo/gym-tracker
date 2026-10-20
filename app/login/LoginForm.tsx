@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 
-export default function LoginForm({ next }: { next?: string }) {
+export default function LoginForm({ next }: { next: string }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -22,8 +22,7 @@ export default function LoginForm({ next }: { next?: string }) {
         setBusy(false);
         return;
       }
-      const target = next && next.startsWith('/') && !next.startsWith('//') ? next : '/';
-      window.location.assign(target);
+      window.location.assign(next);
     } catch {
       setError('Could not sign in, try again');
       setBusy(false);

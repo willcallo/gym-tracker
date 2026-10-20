@@ -1,7 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
 export const COOKIE_NAME = 'gym_session';
-export const COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
+const COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 
 export function authEnabled(): boolean {
   return !!process.env.APP_PASSWORD;

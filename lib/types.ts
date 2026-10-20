@@ -30,12 +30,12 @@ export interface SetValues {
   rpe: number | null;
 }
 
-export interface SessionSet extends SetValues {
+interface SessionSet extends SetValues {
   id: number;
   set_number: number;
 }
 
-export interface ExerciseGroup {
+interface ExerciseGroup {
   position: number;
   exercise_id: number;
   exercise_name: string;
