@@ -7,6 +7,8 @@ import { parseId } from '@/lib/http';
 import { capitalize, formatDate, formatSet } from '@/lib/format';
 import { Card, Chip, PageHeader } from '../../components/ui';
 import SessionActions from './SessionActions';
+import CoachingPanel from './CoachingPanel';
+import { aiEnabled } from '@/lib/ai';
 
 export default async function SessionPage({ params }: { params: Promise<{ id: string }> }) {
   const id = parseId((await params).id);
@@ -43,6 +45,13 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
           </ol>
         </Card>
       ))}
+      <CoachingPanel
+        sessionId={session.id}
+        initialNote={session.coaching_note}
+        initialAt={session.coaching_at}
+        initialStale={session.coaching_stale}
+        aiEnabled={aiEnabled()}
+      />
       <SessionActions id={session.id} />
     </div>
   );

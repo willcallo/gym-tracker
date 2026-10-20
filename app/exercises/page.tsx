@@ -2,9 +2,11 @@ export const dynamic = 'force-dynamic';
 
 import Link from 'next/link';
 import { getExerciseOverview } from '@/lib/db';
+import { aiEnabled } from '@/lib/ai';
 import { capitalize, formatDate, formatPR, formatSet } from '@/lib/format';
 import { Chip, EmptyState, PageHeader, SectionTitle } from '../components/ui';
 import type { ExerciseOverview } from '@/lib/types';
+import TrainingSummary from './TrainingSummary';
 
 function ExerciseCard({ e }: { e: ExerciseOverview }) {
   const pr = formatPR(e.pr, e.is_bodyweight);
@@ -56,13 +58,14 @@ function ExerciseCard({ e }: { e: ExerciseOverview }) {
 }
 
 export default async function ExercisesPage() {
-  const { exercises } = await getExerciseOverview();
+  const { exercises, summary, sessionCount } = await getExerciseOverview();
   const done = exercises.filter((e) => e.session_count > 0);
   const untouched = exercises.filter((e) => e.session_count === 0);
 
   return (
     <>
       <PageHeader title="Exercises" subtitle="Most done first. Tap one for its progress." />
+      <TrainingSummary initial={summary} sessionCount={sessionCount} aiEnabled={aiEnabled()} />
       {exercises.length === 0 ? (
         <EmptyState>No exercises yet. Create one while logging a session.</EmptyState>
       ) : (
