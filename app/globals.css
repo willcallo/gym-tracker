@@ -43,3 +43,10 @@ textarea {
   outline: 2px solid var(--color-brand-ink);
   outline-offset: 2px;
 }
+
+/* Recharts focuses its wrapper on tap, which draws a stray browser outline. */
+.recharts-wrapper,
+.recharts-wrapper *:focus,
+.recharts-surface:focus {
+  outline: none;
+}
