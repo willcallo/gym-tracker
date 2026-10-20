@@ -6,6 +6,7 @@ import { getSession } from '@/lib/db';
 import { parseId } from '@/lib/http';
 import { capitalize, formatDate, formatSet } from '@/lib/format';
 import { Card, Chip, PageHeader } from '../../components/ui';
+import SessionActions from './SessionActions';
 
 export default async function SessionPage({ params }: { params: Promise<{ id: string }> }) {
   const id = parseId((await params).id);
@@ -15,6 +16,9 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
 
   return (
     <div className="space-y-4">
+      <Link href="/history" className="inline-flex min-h-12 items-center text-base font-semibold text-brand-ink">
+        &lsaquo; History
+      </Link>
       <PageHeader
         title={formatDate(session.date)}
         action={session.label ? <Chip tone="brand">{session.label}</Chip> : undefined}
@@ -39,6 +43,7 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
           </ol>
         </Card>
       ))}
+      <SessionActions id={session.id} />
     </div>
   );
 }

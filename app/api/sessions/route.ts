@@ -1,6 +1,27 @@
-import { createSession } from '@/lib/db';
-import { badRequest, isPgError, serverError } from '@/lib/http';
+import { createSession, getSessionsPage } from '@/lib/db';
+import { badRequest, isPgError, parseId, serverError } from '@/lib/http';
 import { parseSessionInput } from '@/lib/validate';
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// Cursor-paginated list for History's infinite scroll.
+export async function GET(request: Request) {
+  try {
+    const params = new URL(request.url).searchParams;
+    const beforeDate = params.get('beforeDate');
+    const beforeId = parseId(params.get('beforeId') ?? '');
+    const limit = Math.min(50, Math.max(1, parseInt(params.get('limit') ?? '20', 10) || 20));
+
+    let before;
+    if (beforeDate !== null || beforeId !== null) {
+      if (!beforeDate || !DATE_RE.test(beforeDate) || beforeId === null) return badRequest('Invalid cursor');
+      before = { date: beforeDate, id: beforeId };
+    }
+    return Response.json(await getSessionsPage(limit, before));
+  } catch (e) {
+    return serverError(e, 'GET /api/sessions');
+  }
+}
 
 export async function POST(request: Request) {
   try {

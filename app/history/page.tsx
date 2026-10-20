@@ -1,10 +1,15 @@
-import { PageHeader, EmptyState } from '../components/ui';
+export const dynamic = 'force-dynamic';
 
-export default function HistoryPage() {
+import { getSessionsPage } from '@/lib/db';
+import { PageHeader } from '../components/ui';
+import HistoryList from './HistoryList';
+
+export default async function HistoryPage() {
+  const { sessions, nextCursor } = await getSessionsPage(20);
   return (
     <>
       <PageHeader title="History" />
-      <EmptyState>Coming in the next push.</EmptyState>
+      <HistoryList initialSessions={sessions} initialCursor={nextCursor} />
     </>
   );
 }
