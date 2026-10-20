@@ -3,83 +3,99 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
+const icon = (children: React.ReactNode) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="26"
+    height="26"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    {children}
+  </svg>
+);
+
 const links = [
   {
     href: '/',
     label: 'Home',
-    icon: (
-      <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
-        <polyline points="9 22 9 12 15 12 15 22" />
-      </svg>
+    match: (p: string) => p === '/' || p.startsWith('/log'),
+    icon: icon(
+      <>
+        <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" />
+      </>
     ),
   },
   {
-    href: '/log',
-    label: 'Log',
-    icon: (
-      <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="10" />
-        <line x1="12" y1="8" x2="12" y2="16" />
-        <line x1="8" y1="12" x2="16" y2="12" />
-      </svg>
+    href: '/exercises',
+    label: 'Exercises',
+    match: (p: string) => p.startsWith('/exercises'),
+    icon: icon(
+      <>
+        <path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11" />
+      </>
     ),
   },
   {
     href: '/history',
     label: 'History',
-    icon: (
-      <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="10" />
-        <polyline points="12 6 12 12 16 14" />
-      </svg>
-    ),
-  },
-  {
-    href: '/body',
-    label: 'Body',
-    icon: (
-      <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="5" r="2" />
-        <path d="M12 7v8" />
-        <path d="M9 10h6" />
-        <path d="M10 15l-2 4" />
-        <path d="M14 15l2 4" />
-      </svg>
+    match: (p: string) => p.startsWith('/history'),
+    icon: icon(
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7v5l3 2" />
+      </>
     ),
   },
   {
     href: '/settings',
     label: 'Settings',
-    icon: (
-      <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="3" />
-        <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" />
-      </svg>
+    match: (p: string) => p.startsWith('/settings'),
+    icon: icon(
+      <>
+        <path d="M4 7h10M18 7h2M4 17h2M10 17h10" />
+        <circle cx="16" cy="7" r="2" />
+        <circle cx="8" cy="17" r="2" />
+      </>
     ),
   },
 ];
 
 export default function Nav() {
   const pathname = usePathname();
+  if (pathname === '/login') return null;
 
   return (
-    <nav className="fixed bottom-0 inset-x-0 z-50 bg-gray-950 border-t border-gray-800 flex" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
-      {links.map((link) => {
-        const active = pathname === link.href;
-        return (
-          <Link
-            key={link.href}
-            href={link.href}
-            className={`flex flex-1 flex-col items-center justify-center gap-0.5 py-2 min-h-[56px] transition-colors ${
-              active ? 'text-indigo-400' : 'text-gray-500 hover:text-gray-300'
-            }`}
-          >
-            {link.icon}
-            <span className="text-[10px] font-medium leading-none">{link.label}</span>
-          </Link>
-        );
-      })}
+    <nav
+      aria-label="Main"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 backdrop-blur"
+      style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+    >
+      <ul className="mx-auto flex max-w-xl">
+        {links.map((link) => {
+          const active = link.match(pathname);
+          return (
+            <li key={link.href} className="flex-1">
+              <Link
+                href={link.href}
+                aria-current={active ? 'page' : undefined}
+                className={`relative flex h-16 flex-col items-center justify-center gap-1 text-xs font-medium ${
+                  active ? 'text-brand-ink' : 'text-gray-600'
+                }`}
+              >
+                {active && <span className="absolute inset-x-6 top-0 h-1 rounded-b-full bg-brand" />}
+                {link.icon}
+                {link.label}
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
     </nav>
   );
 }

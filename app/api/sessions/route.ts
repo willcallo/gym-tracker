@@ -1,24 +1,36 @@
-import { createSession, addSets } from '@/lib/db';
-import type { SetInput } from '@/lib/db';
+import { createSession, getSessionsPage } from '@/lib/db';
+import { badRequest, isPgError, parseId, serverError } from '@/lib/http';
+import { parseSessionInput } from '@/lib/validate';
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// Cursor-paginated list for History's infinite scroll.
+export async function GET(request: Request) {
+  try {
+    const params = new URL(request.url).searchParams;
+    const beforeDate = params.get('beforeDate');
+    const beforeId = parseId(params.get('beforeId') ?? '');
+    const limit = Math.min(50, Math.max(1, parseInt(params.get('limit') ?? '20', 10) || 20));
+
+    let before;
+    if (beforeDate !== null || beforeId !== null) {
+      if (!beforeDate || !DATE_RE.test(beforeDate) || beforeId === null) return badRequest('Invalid cursor');
+      before = { date: beforeDate, id: beforeId };
+    }
+    return Response.json(await getSessionsPage(limit, before));
+  } catch (e) {
+    return serverError(e, 'GET /api/sessions');
+  }
+}
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    const { date, label, notes, sets } = body as {
-      date: string;
-      label?: string;
-      notes?: string;
-      sets: SetInput[];
-    };
-
-    if (!date) return Response.json({ error: 'date is required' }, { status: 400 });
-    if (!sets?.length) return Response.json({ error: 'at least one set is required' }, { status: 400 });
-
-    const session = await createSession(date, label, notes);
-    await addSets(session.id, sets);
-
-    return Response.json({ sessionId: session.id }, { status: 201 });
+    const parsed = parseSessionInput(await request.json().catch(() => null));
+    if (!parsed.ok) return badRequest(parsed.error);
+    const id = await createSession(parsed.value);
+    return Response.json({ id }, { status: 201 });
   } catch (e) {
-    return Response.json({ error: String(e) }, { status: 500 });
+    if (isPgError(e, '23503')) return badRequest('One of the exercises no longer exists');
+    return serverError(e, 'POST /api/sessions');
   }
 }

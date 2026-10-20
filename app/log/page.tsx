@@ -1,18 +1,15 @@
 export const dynamic = 'force-dynamic';
 
-import { getAllExercises, getLastSets } from '@/lib/db';
-import WorkoutForm from '../components/WorkoutForm';
+import { getExercisesForLog, getSettings } from '@/lib/db';
+import { PageHeader } from '../components/ui';
+import SessionForm from '../components/SessionForm/SessionForm';
 
 export default async function LogPage() {
-  const [exercises, lastSets] = await Promise.all([getAllExercises(), getLastSets()]);
-
+  const [exercises, settings] = await Promise.all([getExercisesForLog(), getSettings()]);
   return (
-    <div>
-      <div className="mb-5">
-        <h1 className="text-2xl font-bold text-gray-100">Log Workout</h1>
-        <p className="text-sm text-gray-500 mt-1">Select exercises and log your sets.</p>
-      </div>
-      <WorkoutForm exercises={exercises} lastSets={lastSets} />
-    </div>
+    <>
+      <PageHeader title="New session" />
+      <SessionForm exercises={exercises} settings={settings} />
+    </>
   );
 }

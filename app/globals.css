@@ -1,20 +1,52 @@
 @import "tailwindcss";
 
+@theme {
+  /* Pantone 17-5633 TCX Deep Green. ~3.9:1 on white, so only for fills, big text, charts and icons. */
+  --color-brand: #009276;
+  /* Darker shade of the same green for small text and links, ~6:1 on white. */
+  --color-brand-ink: #00715b;
+  --color-brand-soft: #e5f4f1;
+  --font-sans: var(--font-geist), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
 :root {
-  color-scheme: dark;
+  color-scheme: light;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
-  background-color: #030712;
-  color: #f3f4f6;
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  background-color: #ffffff;
+  color: #111827;
+  font-family: var(--font-sans);
+  overscroll-behavior-y: none;
 }
 
-* {
-  box-sizing: border-box;
+/* Placeholders carry last session's numbers, so they must stay readable (gray-500, 4.8:1). */
+::placeholder {
+  color: #6b7280;
+  opacity: 1;
 }
 
-input[type="number"]::-webkit-inner-spin-button,
-input[type="number"]::-webkit-outer-spin-button {
-  opacity: 0.5;
+button,
+a,
+input,
+select,
+textarea {
+  touch-action: manipulation;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-brand-ink);
+  outline-offset: 2px;
+}
+
+/* Recharts focuses its wrapper on tap, which draws a stray browser outline. */
+.recharts-wrapper,
+.recharts-wrapper *:focus,
+.recharts-surface:focus {
+  outline: none;
 }

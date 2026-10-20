@@ -1,36 +1,67 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Gym Tracker
 
-## Getting Started
+A mobile-first workout tracker for one person. Log sessions at the gym, watch your lifts progress, and optionally ask an AI for coaching. Next.js 16, Postgres (`pg`), Tailwind 4, Recharts, Anthropic SDK.
 
-First, run the development server:
+## Environment variables
+
+| Variable | Required | What it does |
+| --- | --- | --- |
+| `DATABASE_URL` | yes | Postgres connection string. On Neon use the pooled string (`...-pooler...?sslmode=require`). |
+| `APP_PASSWORD` | no | Turns on the password gate. Leave unset for local dev and the gate is off. Changing it signs everyone out. |
+| `ANTHROPIC_API_KEY` | no | Enables the AI buttons. Without it they are disabled with a short explanation. |
+
+For local work put them in `.env.local`.
+
+## Run locally
+
+You need Node 20+ and a Postgres database.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+echo 'DATABASE_URL=postgres://user:pass@localhost:5432/gym' > .env.local
+npm run db:init     # create the tables (safe to repeat)
+npm run db:seed     # optional: about 10 weeks of sample sessions
+npm run dev         # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+| Script | What it does |
+| --- | --- |
+| `npm run db:init` | Creates tables if missing. Idempotent and non-destructive. |
+| `npm run db:seed` | Adds sample data. Refuses to run if any sessions exist. |
+| `npm run db:reset` | Drops every app table (old and new) and recreates the schema. Destroys all data. |
+| `npm run dev:lan` | Dev server on `0.0.0.0` so a phone on your network can reach it. If Next blocks dev assets from your phone's address, add it to `allowedDevOrigins` in `next.config.ts`. |
+| `npm run lint` / `npm run build` | Lint and production build. |
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+The build needs no network: the Geist font is bundled in `app/fonts`.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Deploying to Vercel + Neon
 
-## Learn More
+1. Create a Neon project and copy the **pooled** connection string.
+2. Import the repo in Vercel and set `DATABASE_URL`, `APP_PASSWORD` and (optionally) `ANTHROPIC_API_KEY` for Production and Preview.
+3. Create the schema **once, by hand**, against Neon:
 
-To learn more about Next.js, take a look at the following resources:
+   ```bash
+   DATABASE_URL='postgres://...neon...' npm run db:init
+   DATABASE_URL='postgres://...neon...' npm run db:seed   # optional
+   ```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+   It is not part of the Vercel build on purpose: every preview build would run DDL against the shared database, and a database hiccup would fail deploys that have nothing to do with the schema.
+4. If an earlier version of this app has already touched the database, run `npm run db:reset` once instead of `db:init`, because the old tables have a different shape and `db:init` would keep them.
+5. Deploy. Every page and API route sits behind the password gate, including previews.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Docker
 
-## Deploy on Vercel
+```bash
+docker build -t gym-tracker .
+docker run -p 3000:3000 -e DATABASE_URL=... -e APP_PASSWORD=... gym-tracker
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+The container runs `db:init` before starting, which is safe because it is idempotent.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Behaviour worth knowing
+
+- **Password gate**: one shared password, checked in constant time. Login sets a signed, httpOnly, long-lived cookie (`Secure` on https and in production). Implemented in `proxy.ts`, which replaced `middleware` in Next 16.
+- **Rest timer**: starts when you enter the reps for a set. Last session's numbers show as grey hints, and tapping a hint accepts it. The on/off switch is on the session screen and in Settings and is stored in the database, so it follows you across devices. iOS Safari cannot vibrate, and no web page can play sound while the phone is locked, so keep the screen on (the session screen requests a wake lock, which needs https or localhost).
+- **Drafts**: an unsaved session autosaves to the browser's local storage. Home offers Resume or Discard.
+- **AI** is always on request. Per-session coaching is stored and flagged "may be out of date" if you edit the session afterwards. The "What to train" summary lives on the Exercises tab and records how many sessions it was written from.
+- **Exercises** with logged sets can be renamed and edited but not deleted.

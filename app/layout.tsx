@@ -1,21 +1,34 @@
-import type { Metadata } from 'next';
-import { Geist, Geist_Mono } from 'next/font/google';
+import type { Metadata, Viewport } from 'next';
+import localFont from 'next/font/local';
 import './globals.css';
 import Nav from './components/Nav';
 
-const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] });
-const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] });
+const geist = localFont({
+  src: './fonts/Geist-Variable.woff2',
+  variable: '--font-geist',
+  weight: '100 900',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
   title: 'Gym Tracker',
-  description: 'Personal workout tracker with AI coaching',
+  description: 'Personal workout tracker',
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+  themeColor: '#ffffff',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full`}>
-      <body className="min-h-full bg-gray-950 text-gray-100 antialiased">
-        <main className="mx-auto max-w-2xl px-4 pt-6 pb-24">{children}</main>
+    <html lang="en" className={`${geist.variable} h-full`}>
+      <body className="min-h-full antialiased">
+        <main className="mx-auto max-w-xl px-4 pt-[calc(1.25rem+env(safe-area-inset-top))] pb-[calc(6rem+env(safe-area-inset-bottom))]">
+          {children}
+        </main>
         <Nav />
       </body>
     </html>

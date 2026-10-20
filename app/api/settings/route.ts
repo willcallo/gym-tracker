@@ -1,18 +1,14 @@
-import { getUserSettings, setUserSettings } from '@/lib/db';
-
-export async function GET() {
-  return Response.json(await getUserSettings());
-}
+import { saveSettings } from '@/lib/db';
+import { badRequest, serverError } from '@/lib/http';
+import { parseSettingsInput } from '@/lib/validate';
 
 export async function PUT(request: Request) {
   try {
-    const { bodyweight, age } = await request.json();
-    await setUserSettings(
-      bodyweight != null ? Number(bodyweight) : null,
-      age != null ? Number(age) : null
-    );
-    return Response.json({ ok: true });
+    const body = await request.json().catch(() => null);
+    const parsed = parseSettingsInput(body);
+    if (!parsed.ok) return badRequest(parsed.error);
+    return Response.json(await saveSettings(parsed.value));
   } catch (e) {
-    return Response.json({ error: String(e) }, { status: 500 });
+    return serverError(e, 'PUT /api/settings');
   }
 }

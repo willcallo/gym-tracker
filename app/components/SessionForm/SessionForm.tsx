@@ -1,0 +1,567 @@
+'use client';
+
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { btn, Card, Chip, inputCls, labelCls } from '../ui';
+import ConfirmButton from '../ConfirmButton';
+import Toggle from '../Toggle';
+import ExercisePicker from './ExercisePicker';
+import RestTimerBar from './RestTimerBar';
+import { NEW_DRAFT_KEY, clearDraft, editDraftKey, readDraft, writeDraft } from '@/lib/draftStore';
+import { capitalize, formatClock, formatSet, formatWeight, todayISO } from '@/lib/format';
+import { useRestTimer } from '@/lib/hooks/useRestTimer';
+import { useWakeLock } from '@/lib/hooks/useWakeLock';
+import type { ExerciseWithLast, SessionWithSets, SetValues, Settings } from '@/lib/types';
+
+type Field = 'reps' | 'weight' | 'rpe';
+
+interface SetState {
+  id: string;
+  reps: string;
+  weight: string;
+  rpe: string;
+}
+
+interface BlockState {
+  id: string;
+  exerciseId: number;
+  sets: SetState[];
+}
+
+interface FormState {
+  date: string;
+  label: string;
+  notes: string;
+  blocks: BlockState[];
+}
+
+interface Props {
+  exercises: ExerciseWithLast[];
+  settings: Settings;
+  edit?: { session: SessionWithSets };
+}
+
+const uid = () => Math.random().toString(36).slice(2, 10);
+const emptySet = (): SetState => ({ id: uid(), reps: '', weight: '', rpe: '' });
+const emptyForm = (): FormState => ({ date: todayISO(), label: '', notes: '', blocks: [] });
+
+function formFromSession(s: SessionWithSets): FormState {
+  return {
+    date: s.date,
+    label: s.label ?? '',
+    notes: s.notes ?? '',
+    blocks: s.exercises.map((g) => ({
+      id: uid(),
+      exerciseId: g.exercise_id,
+      sets: g.sets.map((x) => ({
+        id: uid(),
+        reps: String(x.reps),
+        weight: x.weight === null ? '' : formatWeight(x.weight),
+        rpe: x.rpe === null ? '' : String(x.rpe),
+      })),
+    })),
+  };
+}
+
+function loadDraft(key: string, knownExercises: Set<number>): FormState | null {
+  try {
+    const raw = readDraft(key);
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    const f = d?.form;
+    if (d?.v !== 1 || typeof f?.date !== 'string' || !Array.isArray(f.blocks)) return null;
+    const blocks: BlockState[] = f.blocks
+      .filter((b: BlockState) => knownExercises.has(b.exerciseId) && Array.isArray(b.sets) && b.sets.length > 0)
+      .map((b: BlockState) => ({
+        id: String(b.id),
+        exerciseId: b.exerciseId,
+        sets: b.sets.map((s) => ({
+          id: String(s.id),
+          reps: String(s.reps ?? ''),
+          weight: String(s.weight ?? ''),
+          rpe: String(s.rpe ?? ''),
+        })),
+      }));
+    return { date: f.date, label: String(f.label ?? ''), notes: String(f.notes ?? ''), blocks };
+  } catch {
+    return null;
+  }
+}
+
+function sanitize(field: Field, raw: string): string {
+  if (field === 'reps') return raw.replace(/\D/g, '').slice(0, 4);
+  const cleaned = raw.replace(',', '.').replace(/[^\d.]/g, '');
+  const [whole, ...rest] = cleaned.split('.');
+  const joined = rest.length ? `${whole}.${rest.join('')}` : whole;
+  return joined.slice(0, field === 'weight' ? 7 : 4);
+}
+
+const repsOk = (v: string) => /^\d+$/.test(v) && Number(v) >= 1 && Number(v) <= 1000;
+const weightOk = (v: string) => /^(\d+\.?\d*|\.\d+)$/.test(v) && Number(v) > 0 && Number(v) <= 9999;
+const rpeOk = (v: string) => /^(\d+\.?\d*|\.\d+)$/.test(v) && Number(v) >= 1 && Number(v) <= 10;
+
+// Grey hints for each row. Last session's set at the same position wins; extra rows
+// copy the row above (what was entered there, or its own hint).
+function placeholdersFor(block: BlockState, last: SetValues[]): Record<Field, string>[] {
+  const out: Record<Field, string>[] = [];
+  block.sets.forEach((s, i) => {
+    const l = last[i];
+    if (l) {
+      out.push({
+        reps: String(l.reps),
+        weight: l.weight === null ? '' : formatWeight(l.weight),
+        rpe: l.rpe === null ? '' : String(l.rpe),
+      });
+    } else if (i > 0) {
+      const prev = block.sets[i - 1];
+      const hint = out[i - 1];
+      out.push({ reps: prev.reps || hint.reps, weight: prev.weight || hint.weight, rpe: prev.rpe || hint.rpe });
+    } else {
+      out.push({ reps: '', weight: '', rpe: '' });
+    }
+  });
+  return out;
+}
+
+const noopSubscribe = () => () => {};
+
+export default function SessionForm(props: Props) {
+  // localStorage drafts only exist on the client, so render the form after mount.
+  const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false);
+  if (!mounted) return <div className="h-48 animate-pulse rounded-2xl bg-gray-100" aria-hidden="true" />;
+  return <FormInner {...props} />;
+}
+
+function FormInner({ exercises: initialExercises, settings, edit }: Props) {
+  const router = useRouter();
+  const draftKey = edit ? editDraftKey(edit.session.id) : NEW_DRAFT_KEY;
+
+  const [exercises, setExercises] = useState(initialExercises);
+  const [init] = useState(() => {
+    const baseline = edit ? formFromSession(edit.session) : emptyForm();
+    const draft = loadDraft(draftKey, new Set(initialExercises.map((e) => e.id)));
+    return { baseline, form: draft ?? baseline, restored: draft !== null };
+  });
+  const [form, setForm] = useState<FormState>(init.form);
+  const [restored, setRestored] = useState(init.restored);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [attempted, setAttempted] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [timerOn, setTimerOn] = useState(settings.rest_timer_enabled);
+
+  const timer = useRestTimer();
+  useWakeLock(!edit);
+
+  const byId = useMemo(() => new Map(exercises.map((e) => [e.id, e])), [exercises]);
+
+  // ── Autosave ──────────────────────────────────────────────
+  const savedRef = useRef(false);
+  const formRef = useRef(form);
+  useEffect(() => {
+    formRef.current = form;
+  });
+
+  useEffect(() => {
+    function persist(f: FormState) {
+      if (savedRef.current) return;
+      const untouched = edit
+        ? JSON.stringify(f) === JSON.stringify(init.baseline)
+        : f.blocks.length === 0 && !f.label.trim() && !f.notes.trim();
+      if (untouched) clearDraft(draftKey);
+      else writeDraft(draftKey, JSON.stringify({ v: 1, form: f }));
+    }
+    const t = setTimeout(() => persist(form), 250);
+    const flush = () => persist(formRef.current);
+    const onVis = () => document.visibilityState === 'hidden' && flush();
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('pagehide', flush);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('pagehide', flush);
+    };
+  }, [form, draftKey, edit, init.baseline]);
+
+  // ── Form updates ──────────────────────────────────────────
+  function patchBlock(blockId: string, fn: (b: BlockState) => BlockState) {
+    setForm((f) => ({ ...f, blocks: f.blocks.map((b) => (b.id === blockId ? fn(b) : b)) }));
+  }
+
+  function setField(blockId: string, setId: string, field: Field, raw: string) {
+    const value = sanitize(field, raw);
+    const prev = form.blocks.find((b) => b.id === blockId)?.sets.find((s) => s.id === setId)?.[field];
+    patchBlock(blockId, (b) => ({
+      ...b,
+      sets: b.sets.map((s) => (s.id === setId ? { ...s, [field]: value } : s)),
+    }));
+    // Entering the reps for a set is what kicks off the rest countdown.
+    if (field === 'reps' && prev === '' && value !== '' && timerOn && !edit) {
+      timer.start(settings.rest_seconds);
+    }
+  }
+
+  // Tapping an empty field that shows a grey hint accepts the hint as typed input.
+  function onFieldFocus(
+    e: React.FocusEvent<HTMLInputElement>,
+    block: BlockState,
+    set: SetState,
+    field: Field,
+    hint: string
+  ) {
+    const el = e.currentTarget;
+    if (set[field] === '' && hint) setField(block.id, set.id, field, hint);
+    requestAnimationFrame(() => {
+      try {
+        el.setSelectionRange(0, el.value.length);
+      } catch {
+        // some input types don't support selection
+      }
+    });
+  }
+
+  function addExercise(ex: ExerciseWithLast) {
+    const rows = Math.min(8, Math.max(1, ex.last_sets.length));
+    const block: BlockState = {
+      id: uid(),
+      exerciseId: ex.id,
+      sets: Array.from({ length: rows }, emptySet),
+    };
+    setForm((f) => ({ ...f, blocks: [...f.blocks, block] }));
+    setPickerOpen(false);
+    requestAnimationFrame(() =>
+      document.getElementById(`block-${block.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    );
+  }
+
+  async function toggleTimer(next: boolean) {
+    setTimerOn(next);
+    if (!next) timer.dismiss();
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rest_timer_enabled: next }),
+      });
+      if (!res.ok) throw new Error();
+    } catch {
+      setTimerOn(!next);
+      setError('Could not save the rest timer setting.');
+    }
+  }
+
+  // ── Save ──────────────────────────────────────────────────
+  function firstInvalid(): string | null {
+    for (const b of form.blocks) {
+      const ex = byId.get(b.exerciseId);
+      for (const s of b.sets) {
+        if (!repsOk(s.reps)) return `f-${s.id}-reps`;
+        if (!ex?.is_bodyweight && !weightOk(s.weight)) return `f-${s.id}-weight`;
+        if (s.rpe && !rpeOk(s.rpe)) return `f-${s.id}-rpe`;
+      }
+    }
+    return null;
+  }
+
+  async function submit() {
+    setAttempted(true);
+    setError('');
+    if (!form.date) return setError('Pick a date.');
+    if (form.blocks.length === 0) return setError('Add at least one exercise.');
+    const bad = firstInvalid();
+    if (bad) {
+      setError('Fill in the highlighted fields.');
+      // Scroll only. Focusing would tap-fill the grey hint and defeat the check.
+      requestAnimationFrame(() =>
+        document.getElementById(bad)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      );
+      return;
+    }
+
+    const payload = {
+      date: form.date,
+      label: form.label.trim() || null,
+      notes: form.notes.trim() || null,
+      blocks: form.blocks.map((b) => {
+        const bw = byId.get(b.exerciseId)?.is_bodyweight ?? false;
+        return {
+          exercise_id: b.exerciseId,
+          sets: b.sets.map((s) => ({
+            reps: parseInt(s.reps, 10),
+            weight: bw ? null : parseFloat(s.weight),
+            rpe: s.rpe ? parseFloat(s.rpe) : null,
+          })),
+        };
+      }),
+    };
+
+    setSaving(true);
+    try {
+      const res = await fetch(edit ? `/api/sessions/${edit.session.id}` : '/api/sessions', {
+        method: edit ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error ?? 'Could not save. Try again.');
+      savedRef.current = true;
+      clearDraft(draftKey);
+      timer.dismiss();
+      router.push(`/history/${edit ? edit.session.id : data.id}`);
+    } catch (e) {
+      setError(
+        e instanceof TypeError
+          ? 'No connection. Your session is still saved on this device, try again in a moment.'
+          : e instanceof Error
+            ? e.message
+            : 'Could not save. Try again.'
+      );
+      setSaving(false);
+    }
+  }
+
+  const fieldCls = (invalid: boolean) =>
+    `h-14 w-full min-w-0 rounded-xl border bg-white px-1 text-center text-xl font-semibold tabular-nums text-gray-900 placeholder:font-normal focus:outline-none focus:ring-2 ${
+      invalid
+        ? 'border-red-600 bg-red-50 ring-2 ring-red-200'
+        : 'border-gray-300 focus:border-brand-ink focus:ring-brand/40'
+    }`;
+
+  return (
+    <div className="space-y-4">
+      {restored && (
+        <div className="space-y-3 rounded-2xl border border-brand/40 bg-brand-soft p-4">
+          <p className="text-sm font-medium text-gray-900">
+            {edit ? 'Restored your unsaved changes.' : 'Restored your unsaved session.'}
+          </p>
+          <ConfirmButton
+            label={edit ? 'Discard changes' : 'Discard and start over'}
+            confirmLabel="Discard"
+            message="This throws away everything you entered since the last save."
+            variant="secondary"
+            className="w-full"
+            onConfirm={() => {
+              clearDraft(draftKey);
+              setForm(init.baseline);
+              setAttempted(false);
+              setError('');
+              setRestored(false);
+            }}
+          />
+        </div>
+      )}
+
+      <Card className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <div className="min-w-0">
+            <label htmlFor="s-date" className={labelCls}>
+              Date
+            </label>
+            <input
+              id="s-date"
+              type="date"
+              value={form.date}
+              onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
+              className={`${inputCls} min-w-0`}
+            />
+          </div>
+          <div className="min-w-0">
+            <label htmlFor="s-label" className={labelCls}>
+              Label
+            </label>
+            <input
+              id="s-label"
+              value={form.label}
+              onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
+              placeholder="Push, Legs..."
+              maxLength={60}
+              className={inputCls}
+            />
+          </div>
+        </div>
+        <div>
+          <label htmlFor="s-notes" className={labelCls}>
+            Notes
+          </label>
+          <textarea
+            id="s-notes"
+            rows={2}
+            value={form.notes}
+            onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+            maxLength={2000}
+            className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-base focus:border-brand-ink focus:outline-none focus:ring-2 focus:ring-brand/40"
+          />
+        </div>
+        {!edit && (
+          <div className="flex items-center justify-between gap-4 border-t border-gray-200 pt-3">
+            <div>
+              <p className="text-base font-semibold">Rest timer</p>
+              <p className="text-sm text-gray-600">
+                {timerOn ? (
+                  <>
+                    {formatClock(settings.rest_seconds)} after each set.{' '}
+                    <Link href="/settings" className="font-medium text-brand-ink underline">
+                      Change length
+                    </Link>
+                  </>
+                ) : (
+                  'Off'
+                )}
+              </p>
+            </div>
+            <Toggle label="Rest timer" checked={timerOn} onChange={toggleTimer} />
+          </div>
+        )}
+      </Card>
+
+      {form.blocks.map((block) => {
+        const ex = byId.get(block.exerciseId);
+        if (!ex) return null;
+        const hints = placeholdersFor(block, ex.last_sets);
+        const cols = ex.is_bodyweight
+          ? 'grid-cols-[1.75rem_1fr_4.5rem_2.75rem]'
+          : 'grid-cols-[1.75rem_1fr_1.35fr_4.5rem_2.75rem]';
+
+        return (
+          <div key={block.id} id={`block-${block.id}`} className="scroll-mt-4">
+            <Card className="space-y-3">
+              <div>
+                <div className="flex items-start justify-between gap-2">
+                  <h2 className="text-lg font-bold">{ex.name}</h2>
+                  <Chip tone="brand">{capitalize(ex.primary_muscle)}</Chip>
+                </div>
+                {ex.last_sets.length > 0 && (
+                  <p className="mt-0.5 text-sm text-gray-600">
+                    Last time: {ex.last_sets.map((s) => formatSet(s, ex.is_bodyweight)).join(', ')}
+                  </p>
+                )}
+              </div>
+
+              <div className={`grid ${cols} items-end gap-1.5 text-center text-xs font-medium text-gray-600`}>
+                <span>Set</span>
+                <span>Reps</span>
+                {!ex.is_bodyweight && <span>Weight (kg)</span>}
+                <span>RPE</span>
+                <span />
+              </div>
+
+              {block.sets.map((s, i) => {
+                const hint = hints[i];
+                const name = `set ${i + 1}, ${ex.name}`;
+                return (
+                  <div key={s.id} className={`grid ${cols} items-center gap-1.5`}>
+                    <span className="text-center text-base font-semibold text-gray-600">{i + 1}</span>
+                    <input
+                      id={`f-${s.id}-reps`}
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      autoComplete="off"
+                      aria-label={`Reps, ${name}`}
+                      value={s.reps}
+                      placeholder={hint.reps}
+                      onFocus={(e) => onFieldFocus(e, block, s, 'reps', hint.reps)}
+                      onChange={(e) => setField(block.id, s.id, 'reps', e.target.value)}
+                      className={fieldCls(attempted && !repsOk(s.reps))}
+                    />
+                    {!ex.is_bodyweight && (
+                      <input
+                        id={`f-${s.id}-weight`}
+                        type="text"
+                        inputMode="decimal"
+                        autoComplete="off"
+                        aria-label={`Weight in kilograms, ${name}`}
+                        value={s.weight}
+                        placeholder={hint.weight}
+                        onFocus={(e) => onFieldFocus(e, block, s, 'weight', hint.weight)}
+                        onChange={(e) => setField(block.id, s.id, 'weight', e.target.value)}
+                        className={fieldCls(attempted && !weightOk(s.weight))}
+                      />
+                    )}
+                    <input
+                      id={`f-${s.id}-rpe`}
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      aria-label={`RPE, ${name}`}
+                      value={s.rpe}
+                      placeholder={hint.rpe}
+                      onFocus={(e) => onFieldFocus(e, block, s, 'rpe', hint.rpe)}
+                      onChange={(e) => setField(block.id, s.id, 'rpe', e.target.value)}
+                      className={fieldCls(attempted && s.rpe !== '' && !rpeOk(s.rpe))}
+                    />
+                    <button
+                      type="button"
+                      aria-label={`Remove ${name}`}
+                      disabled={block.sets.length === 1}
+                      onClick={() =>
+                        patchBlock(block.id, (b) => ({ ...b, sets: b.sets.filter((x) => x.id !== s.id) }))
+                      }
+                      className="flex h-12 w-11 items-center justify-center rounded-xl text-2xl text-gray-600 active:bg-gray-100 disabled:opacity-30"
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
+
+              <button
+                type="button"
+                onClick={() => patchBlock(block.id, (b) => ({ ...b, sets: [...b.sets, emptySet()] }))}
+                className={`${btn('secondary')} w-full`}
+              >
+                Add set
+              </button>
+              <ConfirmButton
+                label="Remove exercise"
+                confirmLabel="Remove"
+                message={`Remove ${ex.name} and its sets from this session?`}
+                variant="ghost"
+                className="w-full text-red-700!"
+                onConfirm={() => setForm((f) => ({ ...f, blocks: f.blocks.filter((b) => b.id !== block.id) }))}
+              />
+            </Card>
+          </div>
+        );
+      })}
+
+      <button type="button" onClick={() => setPickerOpen(true)} className={`${btn('secondary', 'lg')} w-full`}>
+        Add exercise
+      </button>
+
+      {error && (
+        <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-800">
+          {error}
+        </p>
+      )}
+
+      <div className="space-y-2">
+        <button type="button" onClick={submit} disabled={saving} className={`${btn('primary', 'lg')} w-full`}>
+          {saving ? 'Saving...' : edit ? 'Save changes' : 'Save session'}
+        </button>
+        {edit && (
+          <Link href={`/history/${edit.session.id}`} className={`${btn('secondary')} w-full`}>
+            Cancel
+          </Link>
+        )}
+        <p className="text-center text-xs text-gray-600">Your progress is saved on this device as you go.</p>
+      </div>
+
+      {!edit && timer.active && <div className="h-24" aria-hidden="true" />}
+      {!edit && timer.active && <RestTimerBar timer={timer} />}
+
+      {pickerOpen && (
+        <ExercisePicker
+          exercises={exercises}
+          onPick={addExercise}
+          onCreated={(ex) => {
+            setExercises((list) => [ex, ...list]);
+            addExercise(ex);
+          }}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
