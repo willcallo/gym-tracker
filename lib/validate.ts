@@ -63,6 +63,15 @@ export function parseSessionInput(body: unknown): Result<SessionInput> {
   const notes = optText(body.notes, 2000);
   if (notes === undefined) return { ok: false, error: 'Notes are too long (2000 characters max)' };
 
+  let duration_seconds: number | null = null;
+  if (body.duration_seconds != null) {
+    const d = body.duration_seconds;
+    if (typeof d !== 'number' || !Number.isInteger(d) || d < 1 || d > 43200) {
+      return { ok: false, error: 'Duration must be between 1 second and 12 hours' };
+    }
+    duration_seconds = d;
+  }
+
   if (!Array.isArray(body.blocks) || body.blocks.length === 0 || body.blocks.length > 60) {
     return { ok: false, error: 'Add at least one exercise' };
   }
@@ -80,7 +89,7 @@ export function parseSessionInput(body: unknown): Result<SessionInput> {
     }
     blocks.push({ exercise_id: b.exercise_id as number, sets });
   }
-  return { ok: true, value: { date, label, notes, blocks } };
+  return { ok: true, value: { date, label, notes, duration_seconds, blocks } };
 }
 
 export function parseSettingsInput(

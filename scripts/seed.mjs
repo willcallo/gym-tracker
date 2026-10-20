@@ -100,8 +100,8 @@ try {
     first = false;
 
     const { rows } = await client.query(
-      'INSERT INTO sessions (date, label, notes) VALUES ($1,$2,$3) RETURNING id',
-      [date, day, note]
+      'INSERT INTO sessions (date, label, notes, duration_seconds) VALUES ($1,$2,$3,$4) RETURNING id',
+      [date, day, note, rand() < 0.15 ? null : (45 + Math.floor(rand() * 36)) * 60 + Math.floor(rand() * 60)]
     );
     await client.query(
       `INSERT INTO sets (session_id, exercise_id, exercise_position, set_number, reps, weight, rpe)

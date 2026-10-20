@@ -8,8 +8,16 @@ import ConfirmButton from '../ConfirmButton';
 import Toggle from '../Toggle';
 import ExercisePicker from './ExercisePicker';
 import RestTimerBar from './RestTimerBar';
-import { NEW_DRAFT_KEY, clearDraft, editDraftKey, readDraft, writeDraft } from '@/lib/draftStore';
-import { capitalize, formatClock, formatSet, formatWeight, todayISO } from '@/lib/format';
+import {
+  NEW_DRAFT_KEY,
+  clearDraft,
+  editDraftKey,
+  pruneStaleNewDraft,
+  readDraft,
+  writeDraft,
+} from '@/lib/draftStore';
+import { capitalize, formatClock, formatElapsed, formatSet, formatWeight, todayISO } from '@/lib/format';
+import { useElapsed } from '@/lib/hooks/useElapsed';
 import { useRestTimer } from '@/lib/hooks/useRestTimer';
 import { useWakeLock } from '@/lib/hooks/useWakeLock';
 import type { ExerciseWithLast, SessionWithSets, SetValues, Settings } from '@/lib/types';
@@ -33,6 +41,8 @@ interface FormState {
   date: string;
   label: string;
   notes: string;
+  /** Edit mode only: minutes as typed, blank means no duration. */
+  durationMin: string;
   blocks: BlockState[];
 }
 
@@ -44,13 +54,20 @@ interface Props {
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 const emptySet = (): SetState => ({ id: uid(), reps: '', weight: '', rpe: '' });
-const emptyForm = (): FormState => ({ date: todayISO(), label: '', notes: '', blocks: [] });
+const emptyForm = (): FormState => ({ date: todayISO(), label: '', notes: '', durationMin: '', blocks: [] });
+
+// A session left open longer than this is a forgotten draft, so its clock isn't saved as a duration.
+const MAX_AUTO_DURATION_S = 6 * 60 * 60;
+const MAX_MINUTES = 720;
+
+const hasContent = (f: FormState) => f.blocks.length > 0 || !!f.label.trim() || !!f.notes.trim();
 
 function formFromSession(s: SessionWithSets): FormState {
   return {
     date: s.date,
     label: s.label ?? '',
     notes: s.notes ?? '',
+    durationMin: s.duration_seconds ? String(Math.max(1, Math.round(s.duration_seconds / 60))) : '',
     blocks: s.exercises.map((g) => ({
       id: uid(),
       exerciseId: g.exercise_id,
@@ -64,7 +81,10 @@ function formFromSession(s: SessionWithSets): FormState {
   };
 }
 
-function loadDraft(key: string, knownExercises: Set<number>): FormState | null {
+function loadDraft(
+  key: string,
+  knownExercises: Set<number>
+): { form: FormState; startedAt: number | null } | null {
   try {
     const raw = readDraft(key);
     if (!raw) return null;
@@ -83,7 +103,16 @@ function loadDraft(key: string, knownExercises: Set<number>): FormState | null {
           rpe: String(s.rpe ?? ''),
         })),
       }));
-    return { date: f.date, label: String(f.label ?? ''), notes: String(f.notes ?? ''), blocks };
+    return {
+      form: {
+        date: f.date,
+        label: String(f.label ?? ''),
+        notes: String(f.notes ?? ''),
+        durationMin: String(f.durationMin ?? ''),
+        blocks,
+      },
+      startedAt: typeof d.startedAt === 'number' ? d.startedAt : null,
+    };
   } catch {
     return null;
   }
@@ -140,10 +169,19 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
   const [exercises, setExercises] = useState(initialExercises);
   const [init] = useState(() => {
     const baseline = edit ? formFromSession(edit.session) : emptyForm();
+    if (!edit) pruneStaleNewDraft(true);
     const draft = loadDraft(draftKey, new Set(initialExercises.map((e) => e.id)));
-    return { baseline, form: draft ?? baseline, restored: draft !== null };
+    return {
+      baseline,
+      form: draft?.form ?? baseline,
+      // A blank new-session draft is just the clock running, nothing worth announcing.
+      restored: draft !== null && (edit ? true : hasContent(draft.form)),
+      startedAt: draft?.startedAt ?? Date.now(),
+    };
   });
   const [form, setForm] = useState<FormState>(init.form);
+  const [startedAt, setStartedAt] = useState(init.startedAt);
+  const elapsed = useElapsed(edit ? null : startedAt);
   const [restored, setRestored] = useState(init.restored);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [attempted, setAttempted] = useState(false);
@@ -159,18 +197,25 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
   // ── Autosave ──────────────────────────────────────────────
   const savedRef = useRef(false);
   const formRef = useRef(form);
+  const startedAtRef = useRef(startedAt);
   useEffect(() => {
     formRef.current = form;
+    startedAtRef.current = startedAt;
   });
 
   useEffect(() => {
     function persist(f: FormState) {
       if (savedRef.current) return;
-      const untouched = edit
-        ? JSON.stringify(f) === JSON.stringify(init.baseline)
-        : f.blocks.length === 0 && !f.label.trim() && !f.notes.trim();
-      if (untouched) clearDraft(draftKey);
-      else writeDraft(draftKey, JSON.stringify({ v: 1, form: f }));
+      // Edit drafts only exist while there are unsaved changes. A new session is "started" the
+      // moment the form opens, so its draft (and clock) is kept even while still blank.
+      if (edit && JSON.stringify(f) === JSON.stringify(init.baseline)) {
+        clearDraft(draftKey);
+        return;
+      }
+      writeDraft(
+        draftKey,
+        JSON.stringify({ v: 1, form: f, startedAt: edit ? undefined : startedAtRef.current, savedAt: Date.now() })
+      );
     }
     const t = setTimeout(() => persist(form), 250);
     const flush = () => persist(formRef.current);
@@ -182,7 +227,7 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
       document.removeEventListener('visibilitychange', onVis);
       window.removeEventListener('pagehide', flush);
     };
-  }, [form, draftKey, edit, init.baseline]);
+  }, [form, startedAt, draftKey, edit, init.baseline]);
 
   // ── Form updates ──────────────────────────────────────────
   function patchBlock(blockId: string, fn: (b: BlockState) => BlockState) {
@@ -269,6 +314,9 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
     setError('');
     if (!form.date) return setError('Pick a date.');
     if (form.blocks.length === 0) return setError('Add at least one exercise.');
+    if (edit && form.durationMin !== '' && (Number(form.durationMin) < 1 || Number(form.durationMin) > MAX_MINUTES)) {
+      return setError(`Duration must be between 1 and ${MAX_MINUTES} minutes, or blank.`);
+    }
     const bad = firstInvalid();
     if (bad) {
       setError('Fill in the highlighted fields.');
@@ -279,10 +327,25 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
       return;
     }
 
+    let duration_seconds: number | null;
+    if (edit) {
+      // Untouched field: send the stored seconds back as they were, no rounding drift.
+      duration_seconds =
+        form.durationMin === init.baseline.durationMin
+          ? edit.session.duration_seconds
+          : form.durationMin === ''
+            ? null
+            : Number(form.durationMin) * 60;
+    } else {
+      const secs = Math.round((Date.now() - startedAt) / 1000);
+      duration_seconds = secs >= 1 && secs <= MAX_AUTO_DURATION_S ? secs : null;
+    }
+
     const payload = {
       date: form.date,
       label: form.label.trim() || null,
       notes: form.notes.trim() || null,
+      duration_seconds,
       blocks: form.blocks.map((b) => {
         const bw = byId.get(b.exerciseId)?.is_bodyweight ?? false;
         return {
@@ -330,6 +393,20 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
 
   return (
     <div className="space-y-4">
+      {!edit && (
+        <div
+          className="sticky top-0 z-20 -mx-4 border-b border-gray-200 bg-white/95 px-4 pb-2 backdrop-blur"
+          style={{ paddingTop: 'calc(0.5rem + env(safe-area-inset-top))' }}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium text-gray-600">Session time</span>
+            <span data-testid="session-clock" className="text-xl font-bold tabular-nums text-brand-ink">
+              {formatElapsed(elapsed)}
+            </span>
+          </div>
+        </div>
+      )}
+
       {restored && (
         <div className="space-y-3 rounded-2xl border border-brand/40 bg-brand-soft p-4">
           <p className="text-sm font-medium text-gray-900">
@@ -344,6 +421,7 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
             onConfirm={() => {
               clearDraft(draftKey);
               setForm(init.baseline);
+              setStartedAt(Date.now());
               setAttempted(false);
               setError('');
               setRestored(false);
@@ -393,6 +471,23 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
             className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-base focus:border-brand-ink focus:outline-none focus:ring-2 focus:ring-brand/40"
           />
         </div>
+        {edit && (
+          <div>
+            <label htmlFor="s-duration" className={labelCls}>
+              Duration (minutes)
+            </label>
+            <input
+              id="s-duration"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              autoComplete="off"
+              value={form.durationMin}
+              placeholder="Not recorded"
+              onChange={(e) => setForm((f) => ({ ...f, durationMin: e.target.value.replace(/\D/g, '').slice(0, 3) }))}
+              className={inputCls}
+            />
+          </div>
+        )}
         {!edit && (
           <div className="flex items-center justify-between gap-4 border-t border-gray-200 pt-3">
             <div>

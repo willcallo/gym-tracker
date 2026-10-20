@@ -30,7 +30,7 @@ const pool =
 
 // Sessions with their exercises and sets as one JSON column.
 const SESSION_SELECT = `
-  SELECT s.id, s.date, s.label, s.notes, s.coaching_note, s.coaching_at, s.coaching_stale,
+  SELECT s.id, s.date, s.label, s.notes, s.coaching_note, s.coaching_at, s.coaching_stale, s.duration_seconds,
     COALESCE((
       SELECT json_agg(g ORDER BY g.position)
       FROM (
@@ -118,13 +118,13 @@ export async function createSession(input: SessionInput): Promise<number> {
   const arrays = flattenSets(input.blocks);
   const { rows } = await pool.query(
     `WITH s AS (
-       INSERT INTO sessions (date, label, notes) VALUES ($7, $8, $9) RETURNING id
+       INSERT INTO sessions (date, label, notes, duration_seconds) VALUES ($7, $8, $9, $10) RETURNING id
      )
      INSERT INTO sets (session_id, exercise_id, exercise_position, set_number, reps, weight, rpe)
      SELECT s.id, u.exercise_id, u.exercise_position, u.set_number, u.reps, u.weight, u.rpe
      FROM s, ${UNNEST_SETS}
      RETURNING session_id`,
-    [...arrays, input.date, input.label, input.notes]
+    [...arrays, input.date, input.label, input.notes, input.duration_seconds]
   );
   return rows[0].session_id as number;
 }
@@ -137,10 +137,10 @@ export async function updateSession(id: number, input: SessionInput): Promise<bo
     await client.query('BEGIN');
     const upd = await client.query(
       `UPDATE sessions
-       SET date = $2, label = $3, notes = $4, updated_at = now(),
+       SET date = $2, label = $3, notes = $4, duration_seconds = $5, updated_at = now(),
            coaching_stale = (coaching_note IS NOT NULL)
        WHERE id = $1`,
-      [id, input.date, input.label, input.notes]
+      [id, input.date, input.label, input.notes, input.duration_seconds]
     );
     if (upd.rowCount === 0) {
       await client.query('ROLLBACK');

@@ -1,11 +1,18 @@
 'use client';
 
+import { useEffect } from 'react';
 import { ButtonLink } from './ui';
+import Elapsed from './Elapsed';
 import ConfirmButton from './ConfirmButton';
-import { NEW_DRAFT_KEY, clearDraft, useHasDraft } from '@/lib/draftStore';
+import { NEW_DRAFT_KEY, clearDraft, pruneStaleNewDraft, useDraftStart, useHasDraft } from '@/lib/draftStore';
 
 export default function StartSession() {
   const hasDraft = useHasDraft(NEW_DRAFT_KEY);
+  const startedAt = useDraftStart(NEW_DRAFT_KEY);
+
+  useEffect(() => {
+    pruneStaleNewDraft();
+  }, []);
 
   if (!hasDraft) {
     return (
@@ -17,7 +24,15 @@ export default function StartSession() {
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-gray-700">You have an unsaved session in progress.</p>
+      <p className="text-sm text-gray-700">
+        You have an unsaved session in progress
+        {startedAt !== null && (
+          <>
+            : <Elapsed since={startedAt} className="font-semibold text-brand-ink" />
+          </>
+        )}
+        .
+      </p>
       <ButtonLink href="/log" size="lg" className="w-full min-h-24! text-2xl!">
         Resume session
       </ButtonLink>
