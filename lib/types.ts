@@ -53,6 +53,7 @@ export interface SessionWithSets {
   coaching_note: string | null;
   coaching_at: string | null;
   coaching_stale: boolean;
+  duration_seconds: number | null;
   exercises: ExerciseGroup[];
 }
 
@@ -92,6 +93,7 @@ export interface SessionInput {
   date: string;
   label: string | null;
   notes: string | null;
+  duration_seconds: number | null;
   blocks: { exercise_id: number; sets: SetValues[] }[];
 }
 

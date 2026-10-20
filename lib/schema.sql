@@ -62,3 +62,8 @@ CREATE TABLE IF NOT EXISTS training_summary (
   session_count INTEGER NOT NULL,
   generated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Added after the first release. Idempotent, so it is safe on existing databases too.
+ALTER TABLE sessions
+  ADD COLUMN IF NOT EXISTS duration_seconds INTEGER
+  CHECK (duration_seconds IS NULL OR duration_seconds BETWEEN 1 AND 43200);

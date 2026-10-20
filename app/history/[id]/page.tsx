@@ -4,7 +4,7 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { getSession } from '@/lib/db';
 import { parseId } from '@/lib/http';
-import { capitalize, formatDate, formatSet } from '@/lib/format';
+import { capitalize, formatDate, formatDuration, formatSet } from '@/lib/format';
 import { Card, Chip, PageHeader } from '../../components/ui';
 import SessionActions from './SessionActions';
 import CoachingPanel from './CoachingPanel';
@@ -23,6 +23,7 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
       </Link>
       <PageHeader
         title={formatDate(session.date)}
+        subtitle={session.duration_seconds ? `Took ${formatDuration(session.duration_seconds)}` : undefined}
         action={session.label ? <Chip tone="brand">{session.label}</Chip> : undefined}
       />
       {session.notes && <p className="rounded-xl bg-gray-50 px-4 py-3 text-sm text-gray-800">{session.notes}</p>}

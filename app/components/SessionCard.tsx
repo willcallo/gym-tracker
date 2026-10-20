@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { formatDate } from '@/lib/format';
+import { formatDate, formatDuration } from '@/lib/format';
 import { Chip } from './ui';
 import type { SessionWithSets } from '@/lib/types';
 
@@ -21,6 +21,7 @@ export default function SessionCard({ session }: { session: SessionWithSets }) {
       <p className="mt-1 text-sm text-gray-700">
         {session.exercises.length} exercise{session.exercises.length === 1 ? '' : 's'} · {totalSets} set
         {totalSets === 1 ? '' : 's'}
+        {session.duration_seconds ? ` · ${formatDuration(session.duration_seconds)}` : ''}
       </p>
       {shown && (
         <p className="mt-0.5 truncate text-sm text-gray-600">
