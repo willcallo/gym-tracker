@@ -1,5 +1,9 @@
--- Idempotent: safe to run on every container start or repeatedly by hand.
--- Nothing in here drops or alters data. Use `npm run db:reset` to start over.
+-- Runs automatically on every Vercel build (previews and production) and on container start,
+-- so it must stay additive and idempotent: CREATE ... IF NOT EXISTS, ADD COLUMN IF NOT EXISTS.
+-- Never drop, rename or delete here (scripts/db-init.mjs refuses to run if it sees DROP,
+-- TRUNCATE or DELETE FROM). The previous release's code keeps running against the new schema
+-- while a deploy is in flight, so new columns must be nullable or have defaults.
+-- Use `npm run db:reset` to start over locally.
 
 CREATE TABLE IF NOT EXISTS exercises (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

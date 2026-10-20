@@ -7,6 +7,7 @@ A mobile-first workout tracker for one person. Log sessions at the gym, watch yo
 | Variable | Required | What it does |
 | --- | --- | --- |
 | `DATABASE_URL` | yes | Postgres connection string. On Neon use the pooled string (`...-pooler...?sslmode=require`). |
+| `DATABASE_URL_UNPOOLED` | no | Direct connection. When set, `db:init`, `db:seed` and `db:reset` use it instead (Neon's Vercel integration sets it). |
 | `APP_PASSWORD` | no | Turns on the password gate. Leave unset for local dev and the gate is off. Changing it signs everyone out. |
 | `ANTHROPIC_API_KEY` | no | Enables the AI buttons. Without it they are disabled with a short explanation. |
 
@@ -34,20 +35,29 @@ npm run dev         # http://localhost:3000
 
 The build needs no network: the Geist font is bundled in `app/fonts`.
 
-## Deploying to Vercel + Neon
+## Making changes: preview, test, ship
 
-1. Create a Neon project and copy the **pooled** connection string.
-2. Import the repo in Vercel and set `DATABASE_URL`, `APP_PASSWORD` and (optionally) `ANTHROPIC_API_KEY` for Production and Preview.
-3. Create the schema **once, by hand**, against Neon:
+**Start every change on a new, descriptively named branch from `master`** (for example `rest-timer-sound`), not by reusing an old branch. Each branch gets its own preview URL and its own pull request, so changes stay separate and you can ship them one at a time.
 
-   ```bash
-   DATABASE_URL='postgres://...neon...' npm run db:init
-   DATABASE_URL='postgres://...neon...' npm run db:seed   # optional
-   ```
+1. **Push the branch / open a PR.** Vercel builds a temporary preview site and posts its URL on the PR. The build runs `npm run vercel-build`, which applies the schema (`db:init`) to that preview's own database and then builds the app.
+2. **Test it on your phone** at the preview URL. The preview has its own copy of your production data (a Neon branch), so nothing you do there touches the real site. The password gate applies to previews too.
+3. **Merge the PR into `master`** when you are happy. Vercel rebuilds from `master` with production settings, applies the schema to the production database, and deploys. That is how a change gets onto the main site.
+4. **Do not use "Promote to Production" on a preview.** It reuses the preview's build, environment variables and database. Merge instead. If a production deploy turns out to be bad, use Vercel's Instant Rollback: schema changes are additive, so the previous code keeps working.
 
-   It is not part of the Vercel build on purpose: every preview build would run DDL against the shared database, and a database hiccup would fail deploys that have nothing to do with the schema.
-4. If an earlier version of this app has already touched the database, run `npm run db:reset` once instead of `db:init`, because the old tables have a different shape and `db:init` would keep them.
-5. Deploy. Every page and API route sits behind the password gate, including previews.
+### Schema changes are automatic, so keep them safe
+`lib/schema.sql` runs on every Vercel build (previews and production) and on container start. It must stay additive and idempotent: `CREATE ... IF NOT EXISTS`, `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, new columns nullable or with defaults. `npm run db:init` refuses to run if the file contains `DROP`, `TRUNCATE` or `DELETE FROM`. A destructive change needs a deliberate manual migration, not an edit to this file.
+
+### One-time setup (Vercel + Neon)
+1. In Neon, create a project. In Vercel, import this repo and set **Production Branch** to `master`.
+2. In Vercel, add the **Neon integration** (Integrations tab) and connect it to the project. Turn on a database branch for each preview deployment. The integration sets `DATABASE_URL` (pooled) and `DATABASE_URL_UNPOOLED` for you; the schema scripts use the unpooled one when it exists.
+3. **Required: turn on automatic deletion of old preview branches** in the same integration settings (the exact label may differ, look for the option that deletes Neon branches when their preview deployments are removed). Neon's free tier limits how many branches a project can have. Without auto-delete, old previews pile up until the limit is hit and new preview deployments start failing. Also glance at the Branches page in the Neon console now and then.
+4. Remove any `DATABASE_URL` you added by hand earlier, at least for the Preview environment, so previews never point at the production database.
+5. Set environment variables:
+   - Production: `APP_PASSWORD`, `ANTHROPIC_API_KEY`.
+   - Preview: `APP_PASSWORD` (the same one is fine). Leave `ANTHROPIC_API_KEY` unset on Preview unless you want previews spending API credits; the AI buttons simply stay disabled.
+6. Push a branch. In the preview's build log you should see `Schema is up to date.`
+
+A database that still has tables from a much older version of this app needs `npm run db:reset` once, because `db:init` would keep the old shape.
 
 ## Docker
 
