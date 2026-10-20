@@ -51,6 +51,7 @@ export function buildCoachingPrompt(session: SessionWithSets, ctx: CoachingConte
 
   const sessionHeader = [
     `## Session: ${session.date}${session.label ? ` (${session.label})` : ''}`,
+    session.duration_seconds ? `Duration: ${Math.round(session.duration_seconds / 60)} min` : '',
     session.notes ? `Notes from athlete: "${session.notes}"` : '',
   ]
     .filter(Boolean)
