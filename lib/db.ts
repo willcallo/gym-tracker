@@ -184,7 +184,7 @@ export async function getExercisesForLog(): Promise<ExerciseWithLast[]> {
     `SELECT e.id, e.name, e.is_bodyweight, e.primary_muscle, e.secondary_muscle,
             COALESCE(l.last_sets, '[]'::json) AS last_sets
      FROM exercises e ${LAST_SETS_JOINS}
-     ORDER BY e.name`
+     ORDER BY ls.last_date DESC NULLS LAST, e.name`
   );
   return rows as ExerciseWithLast[];
 }
