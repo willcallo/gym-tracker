@@ -53,13 +53,17 @@ export default function ExerciseEditor({
 
   async function remove() {
     setError('');
-    const res = await fetch(`/api/exercises/${exercise.id}`, { method: 'DELETE' });
-    if (res.ok || res.status === 404) {
-      router.replace('/exercises');
-      return;
+    try {
+      const res = await fetch(`/api/exercises/${exercise.id}`, { method: 'DELETE' });
+      if (res.ok || res.status === 404) {
+        router.replace('/exercises');
+        return;
+      }
+      const data = await res.json().catch(() => null);
+      setError(data?.error ?? 'Could not delete the exercise');
+    } catch {
+      setError('No connection. Try again.');
     }
-    const data = await res.json().catch(() => null);
-    setError(data?.error ?? 'Could not delete the exercise');
   }
 
   if (!open) {

@@ -1,6 +1,7 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { btn, inputCls, labelCls } from '../ui';
 import Toggle from '../Toggle';
 import { capitalize } from '@/lib/format';
@@ -27,6 +28,33 @@ export default function ExercisePicker({
   const [bodyweight, setBodyweight] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+
+  // Behaves like a real dialog: the page behind can't scroll or be reached by screen readers,
+  // Escape backs out, and focus goes back to the button that opened it.
+  // Read before autoFocus moves focus into the search box.
+  const [opener] = useState(() => document.activeElement as HTMLElement | null);
+
+  useEffect(() => {
+    const behind = document.querySelectorAll('main, nav[aria-label="Main"]');
+    behind.forEach((el) => el.setAttribute('inert', ''));
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      behind.forEach((el) => el.removeAttribute('inert'));
+      document.body.style.overflow = overflow;
+      opener?.focus?.();
+    };
+  }, [opener]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (creating) setCreating(false);
+      else onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [creating, onClose]);
 
   const q = query.trim().toLowerCase();
   const matches = useMemo(
@@ -64,7 +92,8 @@ export default function ExercisePicker({
     }
   }
 
-  return (
+  // In a portal so that hiding <main> from the page behind doesn't hide the dialog too.
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -203,6 +232,7 @@ export default function ExercisePicker({
           </ul>
         </>
       )}
-    </div>
+    </div>,
+    document.body
   );
 }

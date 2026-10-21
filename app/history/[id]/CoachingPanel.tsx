@@ -54,7 +54,7 @@ export default function CoachingPanel({
             )}
             <AiText text={note} />
             {at && (
-              <p className="text-xs text-gray-600">
+              <p className="text-xs text-gray-600" suppressHydrationWarning>
                 Written {new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
               </p>
             )}
