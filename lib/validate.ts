@@ -4,6 +4,15 @@ import type { ExerciseInput, MuscleGroup, SessionInput, SetValues } from './type
 type Result<T> = { ok: true; value: T } | { ok: false; error: string };
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const KEY_RE = /^[A-Za-z0-9_-]{8,64}$/;
+const MAX_INT = 2_147_483_647;
+
+// A real calendar date: Date.parse alone accepts 2026-02-30.
+export function isValidDate(v: unknown): v is string {
+  if (typeof v !== 'string' || !DATE_RE.test(v)) return false;
+  const d = new Date(`${v}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().startsWith(v);
+}
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -15,6 +24,10 @@ function optText(v: unknown, max: number): string | null | undefined {
   const t = v.trim();
   if (t.length > max) return undefined;
   return t === '' ? null : t;
+}
+
+function isId(v: unknown): v is number {
+  return typeof v === 'number' && Number.isInteger(v) && v > 0 && v <= MAX_INT;
 }
 
 function isMuscle(v: unknown): v is MuscleGroup {
@@ -55,8 +68,14 @@ export function parseSessionInput(body: unknown): Result<SessionInput> {
   if (!isRecord(body)) return { ok: false, error: 'Invalid request' };
 
   const date = body.date;
-  if (typeof date !== 'string' || !DATE_RE.test(date) || Number.isNaN(Date.parse(date))) {
-    return { ok: false, error: 'A valid date is required' };
+  if (!isValidDate(date)) return { ok: false, error: 'A valid date is required' };
+
+  let client_key: string | null = null;
+  if (body.client_key != null) {
+    if (typeof body.client_key !== 'string' || !KEY_RE.test(body.client_key)) {
+      return { ok: false, error: 'Invalid request' };
+    }
+    client_key = body.client_key;
   }
   const label = optText(body.label, 60);
   if (label === undefined) return { ok: false, error: 'Label is too long (60 characters max)' };
@@ -77,7 +96,7 @@ export function parseSessionInput(body: unknown): Result<SessionInput> {
   }
   const blocks: SessionInput['blocks'] = [];
   for (const b of body.blocks) {
-    if (!isRecord(b) || !Number.isInteger(b.exercise_id) || !Array.isArray(b.sets)) {
+    if (!isRecord(b) || !isId(b.exercise_id) || !Array.isArray(b.sets)) {
       return { ok: false, error: 'Invalid exercise block' };
     }
     if (b.sets.length === 0 || b.sets.length > 100) return { ok: false, error: 'Each exercise needs at least one set' };
@@ -89,7 +108,7 @@ export function parseSessionInput(body: unknown): Result<SessionInput> {
     }
     blocks.push({ exercise_id: b.exercise_id as number, sets });
   }
-  return { ok: true, value: { date, label, notes, duration_seconds, blocks } };
+  return { ok: true, value: { date, label, notes, duration_seconds, client_key, blocks } };
 }
 
 export function parseSettingsInput(

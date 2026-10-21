@@ -28,7 +28,9 @@ export function connect() {
 // could destroy data. Destructive changes need a deliberate, manual migration instead.
 export function assertAdditiveSchema(sql) {
   const code = sql.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n]*/g, '');
-  const bad = code.match(/\b(drop|truncate)\b|\bdelete\s+from\b/i);
+  const bad = code.match(
+    /\b(drop|truncate|rename)\b|\bdelete\s+from\b|\balter\s+column\b|\bupdate\s+\w+\s+set\b/i
+  );
   if (bad) {
     console.error(
       `lib/schema.sql contains "${bad[0]}". It runs automatically on every deploy, so it must only ` +

@@ -18,13 +18,36 @@ types.setTypeParser(1700, (v: string) => parseFloat(v));
 types.setTypeParser(1184, (v: string) => new Date(v).toISOString());
 
 // Cached on globalThis so dev hot reloads don't leak pools.
-const g = globalThis as unknown as { __gymPool?: Pool };
+const g = globalThis as unknown as { __gymPool?: Pool; __gymPoolHandled?: boolean };
 const pool =
   g.__gymPool ??
   (g.__gymPool = new Pool({
     connectionString: process.env.DATABASE_URL,
     max: process.env.VERCEL ? 3 : 10,
+    // Neon suspends idle compute and drops connections, so recycle idle ones early. The connect
+    // timeout is generous because the first query after a suspend has to wake the database.
+    idleTimeoutMillis: 10_000,
+    connectionTimeoutMillis: 20_000,
+    keepAlive: true,
   }));
+// A dropped idle connection is not fatal: the pool discards it. Without a listener Node treats the
+// event as an uncaught exception.
+if (!g.__gymPoolHandled) {
+  g.__gymPoolHandled = true;
+  pool.on('error', (e) => console.error('[pg pool] idle client error', e.message));
+}
+
+const TRANSIENT = /terminated unexpectedly|Connection terminated|ECONNRESET|ETIMEDOUT|EPIPE/i;
+
+// For read-only statements: one retry when a stale pooled connection fails.
+async function readQuery(text: string, params?: unknown[]) {
+  try {
+    return await pool.query(text, params);
+  } catch (e) {
+    if (!(e instanceof Error) || !TRANSIENT.test(e.message)) throw e;
+    return pool.query(text, params);
+  }
+}
 
 // ── Shared SQL fragments ─────────────────────────────────────
 
@@ -72,7 +95,7 @@ export async function getSessionsPage(
   limit: number,
   before?: SessionCursor
 ): Promise<{ sessions: SessionWithSets[]; nextCursor: SessionCursor | null }> {
-  const { rows } = await pool.query(
+  const { rows } = await readQuery(
     `${SESSION_SELECT}
      WHERE $1::date IS NULL OR (s.date, s.id) < ($1::date, $2::int)
      ORDER BY s.date DESC, s.id DESC
@@ -86,7 +109,7 @@ export async function getSessionsPage(
 }
 
 export async function getSession(id: number): Promise<SessionWithSets | null> {
-  const { rows } = await pool.query(`${SESSION_SELECT} WHERE s.id = $1`, [id]);
+  const { rows } = await readQuery(`${SESSION_SELECT} WHERE s.id = $1`, [id]);
   return (rows[0] as SessionWithSets) ?? null;
 }
 
@@ -113,20 +136,28 @@ function flattenSets(blocks: SessionInput['blocks']) {
 const UNNEST_SETS = `unnest($1::int[], $2::int[], $3::int[], $4::int[], $5::numeric[], $6::numeric[])
   AS u(exercise_id, exercise_position, set_number, reps, weight, rpe)`;
 
-// One statement: the session row and all of its sets go in together or not at all.
+// One statement: the session row and all of its sets go in together or not at all. With a
+// client_key, a retry of the same save returns the session that already exists.
 export async function createSession(input: SessionInput): Promise<number> {
   const arrays = flattenSets(input.blocks);
+  const params = [...arrays, input.date, input.label, input.notes, input.duration_seconds, input.client_key];
   const { rows } = await pool.query(
     `WITH s AS (
-       INSERT INTO sessions (date, label, notes, duration_seconds) VALUES ($7, $8, $9, $10) RETURNING id
+       INSERT INTO sessions (date, label, notes, duration_seconds, client_key)
+       VALUES ($7, $8, $9, $10, $11)
+       ON CONFLICT (client_key) DO NOTHING
+       RETURNING id
      )
      INSERT INTO sets (session_id, exercise_id, exercise_position, set_number, reps, weight, rpe)
      SELECT s.id, u.exercise_id, u.exercise_position, u.set_number, u.reps, u.weight, u.rpe
      FROM s, ${UNNEST_SETS}
      RETURNING session_id`,
-    [...arrays, input.date, input.label, input.notes, input.duration_seconds]
+    params
   );
-  return rows[0].session_id as number;
+  if (rows[0]) return rows[0].session_id as number;
+  const existing = await pool.query('SELECT id FROM sessions WHERE client_key = $1', [input.client_key]);
+  if (existing.rows[0]) return existing.rows[0].id as number;
+  throw new Error('Session insert returned no row');
 }
 
 // Replaces the session's sets. A stored coaching note is kept but flagged as out of date.
@@ -179,7 +210,7 @@ export async function saveCoachingNote(id: number, note: string): Promise<boolea
 // ── Exercises ────────────────────────────────────────────────
 
 export async function getExercisesForLog(): Promise<ExerciseWithLast[]> {
-  const { rows } = await pool.query(
+  const { rows } = await readQuery(
     `SELECT e.id, e.name, e.is_bodyweight, e.primary_muscle, e.secondary_muscle,
             COALESCE(l.last_sets, '[]'::json) AS last_sets
      FROM exercises e ${LAST_SETS_JOINS}
@@ -194,7 +225,7 @@ export async function getExerciseOverview(): Promise<{
   summary: TrainingSummary | null;
 }> {
   const [exRes, metaRes] = await Promise.all([
-    pool.query(
+    readQuery(
       `SELECT e.id, e.name, e.is_bodyweight, e.primary_muscle, e.secondary_muscle,
               COALESCE(p.session_count, 0)::int AS session_count,
               CASE WHEN e.is_bodyweight THEN p.max_reps ELSE p.max_weight END AS pr,
@@ -208,7 +239,7 @@ export async function getExerciseOverview(): Promise<{
        ${LAST_SETS_JOINS}
        ORDER BY COALESCE(p.session_count, 0) DESC, ls.last_date DESC NULLS LAST, e.name`
     ),
-    pool.query(
+    readQuery(
       `SELECT (SELECT count(*) FROM sessions)::int AS session_count,
               t.summary, t.session_count AS summary_session_count, t.generated_at
        FROM (SELECT 1) x LEFT JOIN training_summary t ON true`
@@ -227,7 +258,7 @@ export async function getExerciseOverview(): Promise<{
 export async function getExerciseDetail(
   id: number
 ): Promise<{ exercise: Exercise; points: ExercisePoint[] } | null> {
-  const { rows } = await pool.query(
+  const { rows } = await readQuery(
     `SELECT e.id, e.name, e.is_bodyweight, e.primary_muscle, e.secondary_muscle,
             COALESCE(pts.points, '[]'::json) AS points
      FROM exercises e
@@ -303,7 +334,7 @@ export async function deleteExercise(id: number): Promise<'deleted' | 'has_sets'
 const DEFAULT_SETTINGS: Settings = { rest_timer_enabled: true, rest_seconds: 90 };
 
 export async function getSettings(): Promise<Settings> {
-  const { rows } = await pool.query('SELECT rest_timer_enabled, rest_seconds FROM settings');
+  const { rows } = await readQuery('SELECT rest_timer_enabled, rest_seconds FROM settings');
   return (rows[0] as Settings) ?? DEFAULT_SETTINGS;
 }
 
@@ -333,7 +364,7 @@ export async function getCoachingContext(session: {
   id: number;
   date: string;
 }): Promise<CoachingContext> {
-  const { rows } = await pool.query(
+  const { rows } = await readQuery(
     `WITH prior AS (
        SELECT s.id, s.date, s.label FROM sessions s
        WHERE (s.date, s.id) < ($1::date, $2::int)
@@ -378,7 +409,7 @@ export interface SummaryContext {
 }
 
 export async function getSummaryContext(): Promise<SummaryContext> {
-  const { rows } = await pool.query(
+  const { rows } = await readQuery(
     `WITH recent AS (SELECT id FROM sessions ORDER BY date DESC, id DESC LIMIT 10)
      SELECT
        (SELECT count(*) FROM sessions)::int AS session_count,
