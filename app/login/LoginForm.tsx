@@ -38,13 +38,14 @@ export default function LoginForm({ next }: { next: string }) {
         value={password}
         onChange={(e) => setPassword(e.target.value)}
         placeholder="Password"
+        aria-label="Password"
         className="h-14 w-full rounded-xl border border-gray-300 bg-white px-4 text-base text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand"
       />
       {error && <p className="text-sm text-red-700">{error}</p>}
       <button
         type="submit"
         disabled={busy || !password}
-        className="h-14 w-full rounded-xl bg-brand text-lg font-semibold text-white disabled:opacity-50"
+        className="h-14 w-full rounded-xl bg-brand text-xl font-bold text-white disabled:opacity-50"
       >
         {busy ? 'Signing in...' : 'Sign in'}
       </button>

@@ -1,6 +1,7 @@
-import { authEnabled, COOKIE_NAME, cookieOptions, createSessionToken, passwordMatches } from '@/lib/auth';
+import { authEnabled, authMisconfigured, COOKIE_NAME, cookieOptions, createSessionToken, passwordMatches } from '@/lib/auth';
 
 export async function POST(request: Request) {
+  if (authMisconfigured()) return Response.json({ error: 'APP_PASSWORD is not set' }, { status: 503 });
   if (!authEnabled()) return Response.json({ ok: true });
 
   let password = '';
@@ -12,6 +13,8 @@ export async function POST(request: Request) {
   }
 
   if (!passwordMatches(password)) {
+    // Slows down guessing: each wrong attempt costs a second. Pair with a Vercel rate limit rule.
+    await new Promise((resolve) => setTimeout(resolve, 1000));
     return Response.json({ error: 'Wrong password' }, { status: 401 });
   }
 
