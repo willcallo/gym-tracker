@@ -8,6 +8,7 @@ import ConfirmButton from '../ConfirmButton';
 import Toggle from '../Toggle';
 import ExercisePicker from './ExercisePicker';
 import RestTimerBar from './RestTimerBar';
+import SessionTopBar from './SessionTopBar';
 import {
   NEW_DRAFT_KEY,
   clearDraft,
@@ -16,9 +17,8 @@ import {
   readDraft,
   writeDraft,
 } from '@/lib/draftStore';
-import { capitalize, formatClock, formatElapsed, formatSet, formatWeight, todayISO } from '@/lib/format';
-import { useElapsed } from '@/lib/hooks/useElapsed';
-import { useRestTimer } from '@/lib/hooks/useRestTimer';
+import { capitalize, formatClock, formatSet, formatWeight, todayISO } from '@/lib/format';
+import { restTimer } from '@/lib/hooks/useRestTimer';
 import { useWakeLock } from '@/lib/hooks/useWakeLock';
 import type { ExerciseWithLast, SessionWithSets, SetValues, Settings } from '@/lib/types';
 
@@ -60,6 +60,26 @@ const emptyForm = (): FormState => ({ date: todayISO(), label: '', notes: '', du
 const MAX_AUTO_DURATION_S = 6 * 60 * 60;
 const MAX_MINUTES = 720;
 
+// Random id for one session's save, so a retry after a dropped connection can't create a duplicate.
+const newKey = () =>
+  (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : '') ||
+  `${uid()}${uid()}${uid()}`;
+
+// What the form says, without the throwaway row ids. Used to tell whether anything really changed.
+const signature = (f: FormState) =>
+  JSON.stringify([
+    f.date,
+    f.label,
+    f.notes,
+    f.durationMin,
+    f.blocks.map((b) => [b.exerciseId, b.sets.map((x) => [x.reps, x.weight, x.rpe])]),
+  ]);
+
+// An edit draft older than this is not worth restoring.
+const MAX_EDIT_DRAFT_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+
+const isBlankSet = (s: SetState) => s.reps === '' && s.weight === '' && s.rpe === '';
+
 const hasContent = (f: FormState) => f.blocks.length > 0 || !!f.label.trim() || !!f.notes.trim();
 
 function formFromSession(s: SessionWithSets): FormState {
@@ -83,14 +103,28 @@ function formFromSession(s: SessionWithSets): FormState {
 
 function loadDraft(
   key: string,
-  knownExercises: Set<number>
-): { form: FormState; startedAt: number | null } | null {
+  knownExercises: Set<number>,
+  /** Edit mode: the session as it is on the server now. A draft made from a different version is dropped. */
+  baseSig: string | null
+): { form: FormState; startedAt: number | null; clientKey: string | null } | null {
   try {
     const raw = readDraft(key);
     if (!raw) return null;
     const d = JSON.parse(raw);
     const f = d?.form;
     if (d?.v !== 1 || typeof f?.date !== 'string' || !Array.isArray(f.blocks)) return null;
+    if (baseSig !== null) {
+      const fresh = typeof d.savedAt === 'number' && Date.now() - d.savedAt < MAX_EDIT_DRAFT_AGE_MS;
+      if (d.base !== baseSig || !fresh) {
+        // Quietly: this runs during render, so no listener notifications.
+        try {
+          localStorage.removeItem(key);
+        } catch {
+          // ignore
+        }
+        return null;
+      }
+    }
     const blocks: BlockState[] = f.blocks
       .filter((b: BlockState) => knownExercises.has(b.exerciseId) && Array.isArray(b.sets) && b.sets.length > 0)
       .map((b: BlockState) => ({
@@ -112,6 +146,7 @@ function loadDraft(
         blocks,
       },
       startedAt: typeof d.startedAt === 'number' ? d.startedAt : null,
+      clientKey: typeof d.clientKey === 'string' ? d.clientKey : null,
     };
   } catch {
     return null;
@@ -127,7 +162,7 @@ function sanitize(field: Field, raw: string): string {
 }
 
 const repsOk = (v: string) => /^\d+$/.test(v) && Number(v) >= 1 && Number(v) <= 1000;
-const weightOk = (v: string) => /^(\d+\.?\d*|\.\d+)$/.test(v) && Number(v) > 0 && Number(v) <= 9999;
+const weightOk = (v: string) => /^(\d+\.?\d*|\.\d+)$/.test(v) && Number(v) >= 0 && Number(v) <= 9999;
 const rpeOk = (v: string) => /^(\d+\.?\d*|\.\d+)$/.test(v) && Number(v) >= 1 && Number(v) <= 10;
 
 // Grey hints for each row. Last session's set at the same position wins; extra rows
@@ -170,9 +205,11 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
   const [init] = useState(() => {
     const baseline = edit ? formFromSession(edit.session) : emptyForm();
     if (!edit) pruneStaleNewDraft(true);
-    const draft = loadDraft(draftKey, new Set(initialExercises.map((e) => e.id)));
+    const draft = loadDraft(draftKey, new Set(initialExercises.map((e) => e.id)), edit ? signature(baseline) : null);
     return {
       baseline,
+      baseSig: signature(baseline),
+      clientKey: draft?.clientKey ?? newKey(),
       form: draft?.form ?? baseline,
       // A blank new-session draft is just the clock running, nothing worth announcing.
       restored: draft !== null && (edit ? true : hasContent(draft.form)),
@@ -181,7 +218,6 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
   });
   const [form, setForm] = useState<FormState>(init.form);
   const [startedAt, setStartedAt] = useState(init.startedAt);
-  const elapsed = useElapsed(edit ? null : startedAt);
   const [restored, setRestored] = useState(init.restored);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [attempted, setAttempted] = useState(false);
@@ -189,7 +225,10 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
   const [error, setError] = useState('');
   const [timerOn, setTimerOn] = useState(settings.rest_timer_enabled);
 
-  const timer = useRestTimer();
+  const clientKeyRef = useRef(init.clientKey);
+  const lastFailedRef = useRef<{ key: string; body: string } | null>(null);
+  const [removed, setRemoved] = useState<{ blockId: string; index: number; set: SetState } | null>(null);
+  const removedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useWakeLock(!edit);
 
   const byId = useMemo(() => new Map(exercises.map((e) => [e.id, e])), [exercises]);
@@ -208,13 +247,20 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
       if (savedRef.current) return;
       // Edit drafts only exist while there are unsaved changes. A new session is "started" the
       // moment the form opens, so its draft (and clock) is kept even while still blank.
-      if (edit && JSON.stringify(f) === JSON.stringify(init.baseline)) {
+      if (edit && signature(f) === init.baseSig) {
         clearDraft(draftKey);
         return;
       }
       writeDraft(
         draftKey,
-        JSON.stringify({ v: 1, form: f, startedAt: edit ? undefined : startedAtRef.current, savedAt: Date.now() })
+        JSON.stringify({
+          v: 1,
+          form: f,
+          startedAt: edit ? undefined : startedAtRef.current,
+          clientKey: edit ? undefined : clientKeyRef.current,
+          base: edit ? init.baseSig : undefined,
+          savedAt: Date.now(),
+        })
       );
     }
     const t = setTimeout(() => persist(form), 250);
@@ -227,7 +273,7 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
       document.removeEventListener('visibilitychange', onVis);
       window.removeEventListener('pagehide', flush);
     };
-  }, [form, startedAt, draftKey, edit, init.baseline]);
+  }, [form, startedAt, draftKey, edit, init.baseSig]);
 
   // ── Form updates ──────────────────────────────────────────
   function patchBlock(blockId: string, fn: (b: BlockState) => BlockState) {
@@ -243,7 +289,7 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
     }));
     // Entering the reps for a set is what kicks off the rest countdown.
     if (field === 'reps' && prev === '' && value !== '' && timerOn && !edit) {
-      timer.start(settings.rest_seconds);
+      restTimer.start(settings.rest_seconds);
     }
   }
 
@@ -257,13 +303,16 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
   ) {
     const el = e.currentTarget;
     if (set[field] === '' && hint) setField(block.id, set.id, field, hint);
-    requestAnimationFrame(() => {
+    // Select the whole value so typing replaces it. iOS needs a second go after it has settled.
+    const selectAll = () => {
       try {
         el.setSelectionRange(0, el.value.length);
       } catch {
         // some input types don't support selection
       }
-    });
+    };
+    requestAnimationFrame(selectAll);
+    setTimeout(selectAll, 80);
   }
 
   function addExercise(ex: ExerciseWithLast) {
@@ -282,7 +331,7 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
 
   async function toggleTimer(next: boolean) {
     setTimerOn(next);
-    if (!next) timer.dismiss();
+    if (!next) restTimer.dismiss();
     try {
       const res = await fetch('/api/settings', {
         method: 'PUT',
@@ -297,8 +346,15 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
   }
 
   // ── Save ──────────────────────────────────────────────────
-  function firstInvalid(): string | null {
-    for (const b of form.blocks) {
+  // Rows the user never touched (planned from last time but skipped) are not part of the session.
+  function withoutBlankRows(blocks: BlockState[]): BlockState[] {
+    return blocks
+      .map((b) => ({ ...b, sets: b.sets.filter((s) => !isBlankSet(s)) }))
+      .filter((b) => b.sets.length > 0);
+  }
+
+  function firstInvalid(blocks: BlockState[]): string | null {
+    for (const b of blocks) {
       const ex = byId.get(b.exerciseId);
       for (const s of b.sets) {
         if (!ex?.is_bodyweight && !weightOk(s.weight)) return `f-${s.id}-weight`;
@@ -310,14 +366,16 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
   }
 
   async function submit() {
+    if (saving) return;
     setAttempted(true);
     setError('');
     if (!form.date) return setError('Pick a date.');
-    if (form.blocks.length === 0) return setError('Add at least one exercise.');
+    const blocks = withoutBlankRows(form.blocks);
+    if (blocks.length === 0) return setError('Add at least one exercise and fill in a set.');
     if (edit && form.durationMin !== '' && (Number(form.durationMin) < 1 || Number(form.durationMin) > MAX_MINUTES)) {
       return setError(`Duration must be between 1 and ${MAX_MINUTES} minutes, or blank.`);
     }
-    const bad = firstInvalid();
+    const bad = firstInvalid(blocks);
     if (bad) {
       setError('Fill in the highlighted fields.');
       // Scroll only. Focusing would tap-fill the grey hint and defeat the check.
@@ -325,6 +383,9 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
         document.getElementById(bad)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
       );
       return;
+    }
+    if (blocks.length !== form.blocks.length || blocks.some((b, i) => b.sets.length !== form.blocks[i].sets.length)) {
+      setForm((f) => ({ ...f, blocks }));
     }
 
     let duration_seconds: number | null;
@@ -346,7 +407,7 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
       label: form.label.trim() || null,
       notes: form.notes.trim() || null,
       duration_seconds,
-      blocks: form.blocks.map((b) => {
+      blocks: blocks.map((b) => {
         const bw = byId.get(b.exerciseId)?.is_bodyweight ?? false;
         return {
           exercise_id: b.exerciseId,
@@ -359,23 +420,31 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
       }),
     };
 
+    // Same content as a save that may have gone through before the connection dropped: reuse its key
+    // so the server hands back that session. Changed content gets a fresh key.
+    const contentSig = JSON.stringify(payload.blocks) + payload.date + payload.label + payload.notes;
+    let key = clientKeyRef.current;
+    if (lastFailedRef.current && lastFailedRef.current.body !== contentSig) key = newKey();
+    clientKeyRef.current = key;
+
     setSaving(true);
     try {
       const res = await fetch(edit ? `/api/sessions/${edit.session.id}` : '/api/sessions', {
         method: edit ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(edit ? payload : { ...payload, client_key: key }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) throw new Error(data?.error ?? 'Could not save. Try again.');
       savedRef.current = true;
       clearDraft(draftKey);
-      timer.dismiss();
+      restTimer.dismiss();
       router.push(`/history/${edit ? edit.session.id : data.id}`);
     } catch (e) {
+      lastFailedRef.current = { key, body: contentSig };
       setError(
         e instanceof TypeError
-          ? 'No connection. Your session is still saved on this device, try again in a moment.'
+          ? 'No connection. Your session is still saved on this device, tap Save again when you have signal. It will not be saved twice.'
           : e instanceof Error
             ? e.message
             : 'Could not save. Try again.'
@@ -384,8 +453,28 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
     }
   }
 
+  function removeSet(block: BlockState, index: number) {
+    const set = block.sets[index];
+    patchBlock(block.id, (b) => ({ ...b, sets: b.sets.filter((x) => x.id !== set.id) }));
+    clearTimeout(removedTimer.current);
+    setRemoved({ blockId: block.id, index, set });
+    removedTimer.current = setTimeout(() => setRemoved(null), 8000);
+  }
+
+  function undoRemove() {
+    if (!removed) return;
+    const { blockId, index, set } = removed;
+    patchBlock(blockId, (b) => {
+      const sets = [...b.sets];
+      sets.splice(Math.min(index, sets.length), 0, set);
+      return { ...b, sets };
+    });
+    clearTimeout(removedTimer.current);
+    setRemoved(null);
+  }
+
   const fieldCls = (invalid: boolean) =>
-    `h-14 w-full min-w-0 rounded-xl border bg-white px-1 text-center text-xl font-semibold tabular-nums text-gray-900 placeholder:font-normal focus:outline-none focus:ring-2 ${
+    `h-14 w-full min-w-0 scroll-mb-40 rounded-xl border bg-white px-1 text-center text-xl font-semibold tabular-nums text-gray-900 placeholder:font-normal focus:outline-none focus:ring-2 ${
       invalid
         ? 'border-red-600 bg-red-50 ring-2 ring-red-200'
         : 'border-gray-300 focus:border-brand-ink focus:ring-brand/40'
@@ -393,19 +482,7 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
 
   return (
     <div className="space-y-4">
-      {!edit && (
-        <div
-          className="sticky top-0 z-20 -mx-4 border-b border-gray-200 bg-white/95 px-4 pb-2 backdrop-blur"
-          style={{ paddingTop: 'calc(0.5rem + env(safe-area-inset-top))' }}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-gray-600">Session time</span>
-            <span data-testid="session-clock" className="text-xl font-bold tabular-nums text-brand-ink">
-              {formatElapsed(elapsed)}
-            </span>
-          </div>
-        </div>
-      )}
+      {!edit && <SessionTopBar startedAt={startedAt} />}
 
       {restored && (
         <div className="space-y-3 rounded-2xl border border-brand/40 bg-brand-soft p-4">
@@ -420,6 +497,9 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
             className="w-full"
             onConfirm={() => {
               clearDraft(draftKey);
+              restTimer.dismiss();
+              clientKeyRef.current = newKey();
+              lastFailedRef.current = null;
               setForm(init.baseline);
               setStartedAt(Date.now());
               setAttempted(false);
@@ -496,7 +576,7 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
                 {timerOn ? (
                   <>
                     {formatClock(settings.rest_seconds)} after each set.{' '}
-                    <Link href="/settings" className="font-medium text-brand-ink underline">
+                    <Link href="/settings" className="inline-flex min-h-11 items-center font-medium text-brand-ink underline">
                       Change length
                     </Link>
                   </>
@@ -590,9 +670,7 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
                       type="button"
                       aria-label={`Remove ${name}`}
                       disabled={block.sets.length === 1}
-                      onClick={() =>
-                        patchBlock(block.id, (b) => ({ ...b, sets: b.sets.filter((x) => x.id !== s.id) }))
-                      }
+                      onClick={() => removeSet(block, i)}
                       className="flex h-12 w-11 items-center justify-center rounded-xl text-2xl text-gray-600 active:bg-gray-100 disabled:opacity-30"
                     >
                       ×
@@ -601,6 +679,18 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
                 );
               })}
 
+              {removed?.blockId === block.id && (
+                <div role="status" className="flex items-center justify-between gap-3 rounded-xl bg-gray-100 px-3">
+                  <span className="text-sm text-gray-800">Set removed.</span>
+                  <button
+                    type="button"
+                    onClick={undoRemove}
+                    className="min-h-12 px-2 text-base font-semibold text-brand-ink"
+                  >
+                    Undo
+                  </button>
+                </div>
+              )}
               <button
                 type="button"
                 onClick={() => patchBlock(block.id, (b) => ({ ...b, sets: [...b.sets, emptySet()] }))}
@@ -643,8 +733,7 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
         <p className="text-center text-xs text-gray-600">Your progress is saved on this device as you go.</p>
       </div>
 
-      {!edit && timer.active && <div className="h-24" aria-hidden="true" />}
-      {!edit && timer.active && <RestTimerBar timer={timer} />}
+      {!edit && <RestTimerBar />}
 
       {pickerOpen && (
         <ExercisePicker
