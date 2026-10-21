@@ -12,7 +12,8 @@ export function aiEnabled(): boolean {
 let client: Anthropic | null = null;
 
 export async function generateText(prompt: string): Promise<string> {
-  client ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  // A hung call must fail well inside the function's time limit, with one retry at most.
+  client ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, timeout: 40_000, maxRetries: 1 });
   const message = await client.messages.create({
     model: MODEL,
     max_tokens: 1024,
@@ -20,34 +21,54 @@ export async function generateText(prompt: string): Promise<string> {
   });
   const block = message.content.find((b) => b.type === 'text');
   if (!block || block.type !== 'text' || !block.text.trim()) throw new Error('Empty response from model');
-  return block.text.trim();
+  return stripDashes(block.text.trim());
+}
+
+// The prompts ask for no em dashes; enforce it, since the app's copy never uses them.
+function stripDashes(text: string): string {
+  return text.replace(/\s*[\u2014\u2013]\s*/g, ', ').replace(/,\s*,/g, ',');
 }
 
 // ── Per-session coaching ─────────────────────────────────────
 
-function findNewPRs(session: SessionWithSets, priorBest: CoachingContext['priorBest']): string[] {
+// Best of each exercise this session against everything before it. An exercise with no history yet
+// is a first time, not a record, so it is listed apart.
+function findNewPRs(
+  session: SessionWithSets,
+  priorBest: CoachingContext['priorBest']
+): { prs: string[]; firsts: string[] } {
   const prior = new Map(priorBest.map((p) => [p.exercise_id, p]));
   const prs: string[] = [];
+  const firsts: string[] = [];
+  const seen = new Set<number>();
   for (const ex of session.exercises) {
+    if (seen.has(ex.exercise_id)) continue;
+    seen.add(ex.exercise_id);
+    // An exercise can appear in two blocks of one session; judge it on all of its sets.
+    const sets = session.exercises.filter((e) => e.exercise_id === ex.exercise_id).flatMap((e) => e.sets);
     const before = prior.get(ex.exercise_id);
+    if (!before) {
+      firsts.push(ex.exercise_name);
+      continue;
+    }
     if (ex.is_bodyweight) {
-      const best = Math.max(...ex.sets.map((s) => s.reps));
-      if (!before || best > before.max_reps) prs.push(`${ex.exercise_name} (${best} reps)`);
+      const best = Math.max(...sets.map((s) => s.reps));
+      if (best > before.max_reps) prs.push(`${ex.exercise_name} (${best} reps)`);
     } else {
-      const weights = ex.sets.map((s) => s.weight ?? 0).filter((w) => w > 0);
+      const weights = sets.map((s) => s.weight ?? 0).filter((w) => w > 0);
       if (!weights.length) continue;
       const best = Math.max(...weights);
-      if (!before || before.max_weight === null || best > before.max_weight) {
+      if (before.max_weight === null || best > before.max_weight) {
         prs.push(`${ex.exercise_name} (${formatWeight(best)}kg)`);
       }
     }
   }
-  return prs;
+  return { prs, firsts };
 }
 
 export function buildCoachingPrompt(session: SessionWithSets, ctx: CoachingContext): string {
   const { recentHistory } = ctx;
-  const newPRs = findNewPRs(session, ctx.priorBest);
+  const { prs: newPRs, firsts } = findNewPRs(session, ctx.priorBest);
 
   const sessionHeader = [
     `## Session: ${session.date}${session.label ? ` (${session.label})` : ''}`,
@@ -91,7 +112,6 @@ export function buildCoachingPrompt(session: SessionWithSets, ctx: CoachingConte
     ['shoulders', ['lats', 'upper back']],
     ['triceps', ['biceps']],
     ['quads', ['hamstrings', 'glutes']],
-    ['lower back', ['core']],
   ];
   const pairLines = pairs
     .map(([a, bArr]) => {
@@ -124,7 +144,7 @@ ${exerciseLines}
 ### Muscle set counts (this session):
 ${muscleCountLine || 'none'}
 
-${newPRs.length > 0 ? `### New personal records:\n${newPRs.map((p) => `  * ${p}`).join('\n')}\n` : ''}### Recent history (the ${recentHistory.length} sessions before this one):
+${newPRs.length > 0 ? `### New personal records:\n${newPRs.map((p) => `  * ${p}`).join('\n')}\n` : ''}${firsts.length > 0 ? `### First time logged (no earlier history, so not records):\n${firsts.map((p) => `  * ${p}`).join('\n')}\n` : ''}### Recent history (the ${recentHistory.length} sessions before this one):
 ${historyLines}
 
 ### Antagonist balance (accumulated: this session + the ${recentHistory.length} before it):
@@ -148,11 +168,16 @@ export function buildSummaryPrompt(ctx: SummaryContext): string {
     .map((p) => `${p.name} ${p.is_bodyweight ? `${p.best} reps` : `${formatWeight(p.best)}kg`}`)
     .join(', ');
 
+  const span =
+    ctx.recentFrom && ctx.recentTo
+      ? `${ctx.recentFrom} to ${ctx.recentTo} (${Math.max(1, Math.round((Date.parse(ctx.recentTo) - Date.parse(ctx.recentFrom)) / 86400000) + 1)} days)`
+      : 'unknown';
+
   return `You are a personal training analyst. Based on the last ${ctx.recentSessions} workout sessions, write a single paragraph (80 to 120 words) summarising training trends. Cover: what's being trained frequently, what's neglected, whether volume is adequate, and one specific actionable focus. Be direct and specific: mention muscle groups and approximate set counts. Do not be generic.
 
 Muscle group set counts (last ${ctx.recentSessions} sessions): ${muscleBreakdown || 'no data'}
-Current PRs: ${prList || 'none yet'}
-Training frequency: ${ctx.recentSessions} sessions
+Best lifts so far, for the most-trained exercises (all-time, not just recent): ${prList || 'none yet'}
+Those ${ctx.recentSessions} sessions span: ${span}
 
 Write only the paragraph. No headers. Never use em dashes.`;
 }

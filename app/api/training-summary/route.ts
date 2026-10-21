@@ -2,6 +2,8 @@ import { getSummaryContext, saveTrainingSummary } from '@/lib/db';
 import { aiEnabled, buildSummaryPrompt, generateText } from '@/lib/ai';
 import { AI_NOT_CONFIGURED, badRequest, serverError, upstreamError } from '@/lib/http';
 
+export const maxDuration = 60;
+
 // Only ever called from the button on the Exercises tab.
 export async function POST() {
   if (!aiEnabled()) return Response.json({ error: AI_NOT_CONFIGURED }, { status: 503 });
