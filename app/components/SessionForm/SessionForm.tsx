@@ -17,7 +17,7 @@ import {
   readDraft,
   writeDraft,
 } from '@/lib/draftStore';
-import { SET_TYPE_NAMES, capitalize, formatClock, formatSet, formatWeight, setLabels, todayISO } from '@/lib/format';
+import { SET_TYPE_LETTERS, SET_TYPE_NAMES, capitalize, formatClock, formatSet, formatWeight, todayISO } from '@/lib/format';
 import { restTimer } from '@/lib/hooks/useRestTimer';
 import { useWakeLock } from '@/lib/hooks/useWakeLock';
 import { SET_TYPES } from '@/lib/types';
@@ -625,7 +625,6 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
         const ex = byId.get(block.exerciseId);
         if (!ex) return null;
         const hints = placeholdersFor(block, ex.last_sets);
-        const labels = setLabels(block.sets.map((s) => ({ set_type: s.type })));
         const cols = ex.is_bodyweight
           ? 'grid-cols-[2.5rem_1fr_4.5rem_2.75rem]'
           : 'grid-cols-[2.5rem_1.35fr_1fr_4.5rem_2.75rem]';
@@ -645,7 +644,7 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
                 )}
                 {blockIndex === 0 && (
                   <p className="mt-0.5 text-sm text-gray-600">
-                    Tap a set number to mark it warm-up (W), drop (D) or failure (F).
+                    Tap a set number to mark it warm-up (W), drop set (D) or failure (F).
                   </p>
                 )}
               </div>
@@ -669,7 +668,10 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
                       aria-label={`Set ${i + 1} is ${SET_TYPE_NAMES[s.type].toLowerCase()}, ${ex.name}. Tap to change.`}
                       className={`flex h-12 w-full items-center justify-center rounded-xl text-base font-bold ${TYPE_STYLE[s.type]}`}
                     >
-                      {labels[i]}
+                      <span className="flex flex-col items-center leading-none">
+                        <span>{i + 1}</span>
+                        {s.type !== 'normal' && <span className="mt-0.5 text-[11px]">{SET_TYPE_LETTERS[s.type]}</span>}
+                      </span>
                     </button>
                     {!ex.is_bodyweight && (
                       <input

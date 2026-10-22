@@ -4,7 +4,7 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { getSession } from '@/lib/db';
 import { parseId } from '@/lib/http';
-import { SET_TYPE_NAMES, capitalize, formatDate, formatDuration, formatSet, setLabels } from '@/lib/format';
+import { SET_TYPE_NAMES, capitalize, formatDate, formatDuration, formatSet } from '@/lib/format';
 import { Card, Chip, PageHeader } from '../../components/ui';
 import SessionActions from './SessionActions';
 import CoachingPanel from './CoachingPanel';
@@ -27,19 +27,18 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
         action={session.label ? <Chip tone="brand">{session.label}</Chip> : undefined}
       />
       {session.notes && <p className="rounded-xl bg-gray-50 px-4 py-3 text-sm text-gray-800">{session.notes}</p>}
-      {session.exercises.map((g) => {
-        const labels = setLabels(g.sets);
-        return (
+      {session.exercises.map((g) => (
         <Card key={g.position}>
           <Link href={`/exercises/${g.exercise_id}`} className="text-lg font-bold text-brand-ink">
             {g.exercise_name}
           </Link>
           <p className="mb-2 text-sm text-gray-600">{capitalize(g.primary_muscle)}</p>
           <ol className="space-y-1">
-            {g.sets.map((s, i) => (
+            {g.sets.map((s) => (
               <li key={s.id} className="flex justify-between text-base">
                 <span className="text-gray-600">
-                  {s.set_type === 'normal' ? `Set ${labels[i]}` : SET_TYPE_NAMES[s.set_type]}
+                  Set {s.set_number}
+                  {s.set_type !== 'normal' && ` · ${SET_TYPE_NAMES[s.set_type]}`}
                 </span>
                 <span className="font-semibold">
                   {formatSet(s, g.is_bodyweight)}
@@ -49,8 +48,7 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
             ))}
           </ol>
         </Card>
-        );
-      })}
+      ))}
       <CoachingPanel
         sessionId={session.id}
         initialNote={session.coaching_note}
