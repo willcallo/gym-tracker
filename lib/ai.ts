@@ -31,6 +31,8 @@ function stripDashes(text: string): string {
 
 // ── Per-session coaching ─────────────────────────────────────
 
+const SET_TYPE_TAGS = { normal: '', warmup: ' [warm-up]', dropset: ' [drop set]', failure: ' [to failure]' } as const;
+
 // Best of each exercise this session against everything before it. An exercise with no history yet
 // is a first time, not a record, so it is listed apart.
 function findNewPRs(
@@ -45,13 +47,17 @@ function findNewPRs(
     if (seen.has(ex.exercise_id)) continue;
     seen.add(ex.exercise_id);
     // An exercise can appear in two blocks of one session; judge it on all of its sets.
-    const sets = session.exercises.filter((e) => e.exercise_id === ex.exercise_id).flatMap((e) => e.sets);
+    const sets = session.exercises
+      .filter((e) => e.exercise_id === ex.exercise_id)
+      .flatMap((e) => e.sets)
+      .filter((s) => s.set_type !== 'warmup');
     const before = prior.get(ex.exercise_id);
     if (!before) {
       firsts.push(ex.exercise_name);
       continue;
     }
     if (ex.is_bodyweight) {
+      if (!sets.length) continue;
       const best = Math.max(...sets.map((s) => s.reps));
       if (best > before.max_reps) prs.push(`${ex.exercise_name} (${best} reps)`);
     } else {
@@ -85,7 +91,7 @@ export function buildCoachingPrompt(session: SessionWithSets, ctx: CoachingConte
         .map((s) => {
           const vol = ex.is_bodyweight || s.weight === null ? `${s.reps} reps` : `${s.reps} x ${formatWeight(s.weight)}kg`;
           const rpe = s.rpe ? ` (RPE ${s.rpe})` : '';
-          return `    * ${vol}${rpe}`;
+          return `    * ${vol}${rpe}${SET_TYPE_TAGS[s.set_type]}`;
         })
         .join('\n');
       return `**${ex.exercise_name}** ${muscleTag}\n${setLines}`;
@@ -94,7 +100,8 @@ export function buildCoachingPrompt(session: SessionWithSets, ctx: CoachingConte
 
   const muscleCounts: Record<string, number> = {};
   for (const ex of session.exercises) {
-    muscleCounts[ex.primary_muscle] = (muscleCounts[ex.primary_muscle] ?? 0) + ex.sets.length;
+    muscleCounts[ex.primary_muscle] =
+      (muscleCounts[ex.primary_muscle] ?? 0) + ex.sets.filter((s) => s.set_type !== 'warmup').length;
   }
   const muscleCountLine = Object.entries(muscleCounts)
     .map(([m, n]) => `${m}: ${n}`)
@@ -141,7 +148,7 @@ ${sessionHeader}
 ### Exercises performed:
 ${exerciseLines}
 
-### Muscle set counts (this session):
+### Muscle set counts (this session, warm-up sets not counted):
 ${muscleCountLine || 'none'}
 
 ${newPRs.length > 0 ? `### New personal records:\n${newPRs.map((p) => `  * ${p}`).join('\n')}\n` : ''}${firsts.length > 0 ? `### First time logged (no earlier history, so not records):\n${firsts.map((p) => `  * ${p}`).join('\n')}\n` : ''}### Recent history (the ${recentHistory.length} sessions before this one):

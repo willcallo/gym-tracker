@@ -1,3 +1,5 @@
+import type { SetType } from './types';
+
 function parseDate(date: string): Date {
   const [y, m, d] = date.split('-').map(Number);
   return new Date(y, m - 1, d);
@@ -70,3 +72,12 @@ export function formatDuration(totalSeconds: number): string {
   const m = mins % 60;
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
+
+export const SET_TYPE_NAMES: Record<SetType, string> = {
+  normal: 'Normal',
+  warmup: 'Warm-up',
+  dropset: 'Drop set',
+  failure: 'Failure',
+};
+
+export const SET_TYPE_LETTERS: Record<SetType, string> = { normal: '', warmup: 'W', dropset: 'D', failure: 'F' };

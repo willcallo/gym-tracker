@@ -1,5 +1,5 @@
-import { MUSCLE_GROUPS } from './types';
-import type { ExerciseInput, MuscleGroup, SessionInput, SetValues } from './types';
+import { MUSCLE_GROUPS, SET_TYPES } from './types';
+import type { ExerciseInput, MuscleGroup, SessionInput, SetType, SetValues } from './types';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -58,10 +58,12 @@ export function parseExerciseInput(body: unknown): Result<ExerciseInput> {
 function parseSet(raw: unknown): SetValues | null {
   if (!isRecord(raw)) return null;
   const { reps, weight, rpe } = raw;
+  const set_type = raw.set_type ?? 'normal';
+  if (typeof set_type !== 'string' || !(SET_TYPES as readonly string[]).includes(set_type)) return null;
   if (typeof reps !== 'number' || !Number.isInteger(reps) || reps < 1 || reps > 1000) return null;
   if (weight != null && (typeof weight !== 'number' || !(weight >= 0) || weight > 9999)) return null;
   if (rpe != null && (typeof rpe !== 'number' || !(rpe >= 1) || rpe > 10)) return null;
-  return { reps, weight: weight ?? null, rpe: rpe ?? null };
+  return { reps, weight: weight ?? null, rpe: rpe ?? null, set_type: set_type as SetType };
 }
 
 export function parseSessionInput(body: unknown): Result<SessionInput> {

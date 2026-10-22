@@ -61,7 +61,7 @@ const SESSION_SELECT = `
                e.name AS exercise_name, e.primary_muscle, e.secondary_muscle, e.is_bodyweight,
                json_agg(json_build_object(
                  'id', st.id, 'set_number', st.set_number,
-                 'reps', st.reps, 'weight', st.weight, 'rpe', st.rpe
+                 'reps', st.reps, 'weight', st.weight, 'rpe', st.rpe, 'set_type', st.set_type
                ) ORDER BY st.set_number) AS sets
         FROM sets st JOIN exercises e ON e.id = st.exercise_id
         WHERE st.session_id = s.id
@@ -76,12 +76,14 @@ const LAST_SETS_JOINS = `
   LEFT JOIN (
     SELECT DISTINCT ON (st.exercise_id) st.exercise_id, st.session_id, s.date AS last_date
     FROM sets st JOIN sessions s ON s.id = st.session_id
+    WHERE st.set_type <> 'warmup'
     ORDER BY st.exercise_id, s.date DESC, s.id DESC
   ) ls ON ls.exercise_id = e.id
   LEFT JOIN LATERAL (
-    SELECT json_agg(json_build_object('reps', st.reps, 'weight', st.weight, 'rpe', st.rpe)
+    SELECT json_agg(json_build_object('reps', st.reps, 'weight', st.weight, 'rpe', st.rpe, 'set_type', st.set_type)
                     ORDER BY st.exercise_position, st.set_number) AS last_sets
-    FROM sets st WHERE st.session_id = ls.session_id AND st.exercise_id = e.id
+    FROM sets st
+    WHERE st.session_id = ls.session_id AND st.exercise_id = e.id AND st.set_type <> 'warmup'
   ) l ON true`;
 
 // ── Sessions ─────────────────────────────────────────────────
@@ -120,6 +122,7 @@ function flattenSets(blocks: SessionInput['blocks']) {
   const reps: number[] = [];
   const weights: (number | null)[] = [];
   const rpes: (number | null)[] = [];
+  const setTypes: string[] = [];
   blocks.forEach((b, position) => {
     b.sets.forEach((s, i) => {
       exerciseIds.push(b.exercise_id);
@@ -128,13 +131,14 @@ function flattenSets(blocks: SessionInput['blocks']) {
       reps.push(s.reps);
       weights.push(s.weight);
       rpes.push(s.rpe);
+      setTypes.push(s.set_type);
     });
   });
-  return [exerciseIds, positions, setNumbers, reps, weights, rpes];
+  return [exerciseIds, positions, setNumbers, reps, weights, rpes, setTypes];
 }
 
-const UNNEST_SETS = `unnest($1::int[], $2::int[], $3::int[], $4::int[], $5::numeric[], $6::numeric[])
-  AS u(exercise_id, exercise_position, set_number, reps, weight, rpe)`;
+const UNNEST_SETS = `unnest($1::int[], $2::int[], $3::int[], $4::int[], $5::numeric[], $6::numeric[], $7::text[])
+  AS u(exercise_id, exercise_position, set_number, reps, weight, rpe, set_type)`;
 
 // One statement: the session row and all of its sets go in together or not at all. With a
 // client_key, a retry of the same save returns the session that already exists.
@@ -144,12 +148,12 @@ export async function createSession(input: SessionInput): Promise<number> {
   const { rows } = await pool.query(
     `WITH s AS (
        INSERT INTO sessions (date, label, notes, duration_seconds, client_key)
-       VALUES ($7, $8, $9, $10, $11)
+       VALUES ($8, $9, $10, $11, $12)
        ON CONFLICT (client_key) DO NOTHING
        RETURNING id
      )
-     INSERT INTO sets (session_id, exercise_id, exercise_position, set_number, reps, weight, rpe)
-     SELECT s.id, u.exercise_id, u.exercise_position, u.set_number, u.reps, u.weight, u.rpe
+     INSERT INTO sets (session_id, exercise_id, exercise_position, set_number, reps, weight, rpe, set_type)
+     SELECT s.id, u.exercise_id, u.exercise_position, u.set_number, u.reps, u.weight, u.rpe, u.set_type
      FROM s, ${UNNEST_SETS}
      RETURNING session_id`,
     params
@@ -179,8 +183,8 @@ export async function updateSession(id: number, input: SessionInput): Promise<bo
     }
     await client.query('DELETE FROM sets WHERE session_id = $1', [id]);
     await client.query(
-      `INSERT INTO sets (session_id, exercise_id, exercise_position, set_number, reps, weight, rpe)
-       SELECT $7::int, u.exercise_id, u.exercise_position, u.set_number, u.reps, u.weight, u.rpe
+      `INSERT INTO sets (session_id, exercise_id, exercise_position, set_number, reps, weight, rpe, set_type)
+       SELECT $8::int, u.exercise_id, u.exercise_position, u.set_number, u.reps, u.weight, u.rpe, u.set_type
        FROM ${UNNEST_SETS}`,
       [...arrays, id]
     );
@@ -243,7 +247,8 @@ export async function getExerciseOverview(): Promise<{
        FROM exercises e
        LEFT JOIN (
          SELECT exercise_id, count(DISTINCT session_id) AS session_count,
-                max(weight) AS max_weight, max(reps) AS max_reps
+                max(weight) FILTER (WHERE set_type <> 'warmup') AS max_weight,
+                max(reps) FILTER (WHERE set_type <> 'warmup') AS max_reps
          FROM sets GROUP BY exercise_id
        ) p ON p.exercise_id = e.id
        ${LAST_SETS_JOINS}
@@ -280,14 +285,17 @@ export async function getExerciseDetail(
               ) ORDER BY x.date, x.session_id) AS points
        FROM (
          SELECT s.id AS session_id, s.date, s.label,
-                max(st.weight) AS top_weight, max(st.reps) AS max_reps,
-                CASE WHEN e.is_bodyweight THEN sum(st.reps)
-                     ELSE sum(st.reps * COALESCE(st.weight, 0)) END AS volume,
-                json_agg(json_build_object('reps', st.reps, 'weight', st.weight, 'rpe', st.rpe)
+                max(st.weight) FILTER (WHERE st.set_type <> 'warmup') AS top_weight,
+                max(st.reps) FILTER (WHERE st.set_type <> 'warmup') AS max_reps,
+                CASE WHEN e.is_bodyweight THEN COALESCE(sum(st.reps) FILTER (WHERE st.set_type <> 'warmup'), 0)
+                     ELSE COALESCE(sum(st.reps * COALESCE(st.weight, 0)) FILTER (WHERE st.set_type <> 'warmup'), 0)
+                END AS volume,
+                json_agg(json_build_object('reps', st.reps, 'weight', st.weight, 'rpe', st.rpe, 'set_type', st.set_type)
                          ORDER BY st.exercise_position, st.set_number) AS sets
          FROM sets st JOIN sessions s ON s.id = st.session_id
          WHERE st.exercise_id = e.id
          GROUP BY s.id, s.date, s.label
+         HAVING bool_or(st.set_type <> 'warmup')
        ) x
      ) pts ON true
      WHERE e.id = $1`,
@@ -386,6 +394,7 @@ export async function getCoachingContext(session: {
          FROM (
            SELECT st.exercise_id, max(st.weight) AS max_weight, max(st.reps) AS max_reps
            FROM sets st JOIN prior p ON p.id = st.session_id
+           WHERE st.set_type <> 'warmup'
            GROUP BY st.exercise_id
          ) b
        ), '[]'::json) AS prior_best,
@@ -397,7 +406,7 @@ export async function getCoachingContext(session: {
                     FROM (
                       SELECT e.primary_muscle AS muscle, count(*)::int AS cnt
                       FROM sets st JOIN exercises e ON e.id = st.exercise_id
-                      WHERE st.session_id = r.id GROUP BY e.primary_muscle
+                      WHERE st.session_id = r.id AND st.set_type <> 'warmup' GROUP BY e.primary_muscle
                     ) m
                   ), '{}'::json)
                 ) ORDER BY r.date DESC, r.id DESC)
@@ -432,7 +441,8 @@ export async function getSummaryContext(): Promise<SummaryContext> {
          FROM (
            SELECT e.primary_muscle AS muscle, count(*)::int AS sets
            FROM sets st JOIN recent r ON r.id = st.session_id
-           JOIN exercises e ON e.id = st.exercise_id GROUP BY e.primary_muscle
+           JOIN exercises e ON e.id = st.exercise_id
+           WHERE st.set_type <> 'warmup' GROUP BY e.primary_muscle
          ) m
        ), '[]'::json) AS muscles,
        COALESCE((
@@ -442,6 +452,7 @@ export async function getSummaryContext(): Promise<SummaryContext> {
            SELECT e.name, e.is_bodyweight, count(DISTINCT st.session_id) AS n,
                   CASE WHEN e.is_bodyweight THEN max(st.reps) ELSE max(st.weight) END AS best
            FROM sets st JOIN exercises e ON e.id = st.exercise_id
+           WHERE st.set_type <> 'warmup'
            GROUP BY e.id ORDER BY n DESC, e.name LIMIT 10
          ) p
        ), '[]'::json) AS prs`

@@ -17,10 +17,11 @@ import {
   readDraft,
   writeDraft,
 } from '@/lib/draftStore';
-import { capitalize, formatClock, formatSet, formatWeight, todayISO } from '@/lib/format';
+import { SET_TYPE_LETTERS, SET_TYPE_NAMES, capitalize, formatClock, formatSet, formatWeight, todayISO } from '@/lib/format';
 import { restTimer } from '@/lib/hooks/useRestTimer';
 import { useWakeLock } from '@/lib/hooks/useWakeLock';
-import type { ExerciseWithLast, SessionWithSets, SetValues, Settings } from '@/lib/types';
+import { SET_TYPES } from '@/lib/types';
+import type { ExerciseWithLast, SessionWithSets, SetType, SetValues, Settings } from '@/lib/types';
 
 type Field = 'reps' | 'weight' | 'rpe';
 
@@ -29,6 +30,7 @@ interface SetState {
   reps: string;
   weight: string;
   rpe: string;
+  type: SetType;
 }
 
 interface BlockState {
@@ -53,7 +55,7 @@ interface Props {
 }
 
 const uid = () => Math.random().toString(36).slice(2, 10);
-const emptySet = (): SetState => ({ id: uid(), reps: '', weight: '', rpe: '' });
+const emptySet = (): SetState => ({ id: uid(), reps: '', weight: '', rpe: '', type: 'normal' });
 const emptyForm = (): FormState => ({ date: todayISO(), label: '', notes: '', durationMin: '', blocks: [] });
 
 // A session left open longer than this is a forgotten draft, so its clock isn't saved as a duration.
@@ -72,7 +74,7 @@ const signature = (f: FormState) =>
     f.label,
     f.notes,
     f.durationMin,
-    f.blocks.map((b) => [b.exerciseId, b.sets.map((x) => [x.reps, x.weight, x.rpe])]),
+    f.blocks.map((b) => [b.exerciseId, b.sets.map((x) => [x.reps, x.weight, x.rpe, x.type])]),
   ]);
 
 // An edit draft older than this is not worth restoring.
@@ -96,6 +98,7 @@ function formFromSession(s: SessionWithSets): FormState {
         reps: String(x.reps),
         weight: x.weight === null ? '' : formatWeight(x.weight),
         rpe: x.rpe === null ? '' : String(x.rpe),
+        type: x.set_type,
       })),
     })),
   };
@@ -135,6 +138,7 @@ function loadDraft(
           reps: String(s.reps ?? ''),
           weight: String(s.weight ?? ''),
           rpe: String(s.rpe ?? ''),
+          type: (SET_TYPES as readonly string[]).includes(s.type) ? s.type : 'normal',
         })),
       }));
     return {
@@ -165,28 +169,44 @@ const repsOk = (v: string) => /^\d+$/.test(v) && Number(v) >= 1 && Number(v) <= 
 const weightOk = (v: string) => /^(\d+\.?\d*|\.\d+)$/.test(v) && Number(v) >= 0 && Number(v) <= 9999;
 const rpeOk = (v: string) => /^(\d+\.?\d*|\.\d+)$/.test(v) && Number(v) >= 1 && Number(v) <= 10;
 
-// Grey hints for each row. Last session's set at the same position wins; extra rows
-// copy the row above (what was entered there, or its own hint).
+// Grey hints for each row. The nth working set takes last session's nth working set; extra rows
+// copy the working row above (what was entered there, or its own hint). Warm-ups get no hint from
+// last time, which only holds working sets, and don't feed the rows below them.
 function placeholdersFor(block: BlockState, last: SetValues[]): Record<Field, string>[] {
+  const empty = { reps: '', weight: '', rpe: '' };
   const out: Record<Field, string>[] = [];
+  let working = 0;
+  let prev = -1; // index of the last working row above
   block.sets.forEach((s, i) => {
-    const l = last[i];
+    if (s.type === 'warmup') {
+      out.push(empty);
+      return;
+    }
+    const l = last[working++];
     if (l) {
       out.push({
         reps: String(l.reps),
         weight: l.weight === null ? '' : formatWeight(l.weight),
         rpe: l.rpe === null ? '' : String(l.rpe),
       });
-    } else if (i > 0) {
-      const prev = block.sets[i - 1];
-      const hint = out[i - 1];
-      out.push({ reps: prev.reps || hint.reps, weight: prev.weight || hint.weight, rpe: prev.rpe || hint.rpe });
+    } else if (prev >= 0) {
+      const p = block.sets[prev];
+      const hint = out[prev];
+      out.push({ reps: p.reps || hint.reps, weight: p.weight || hint.weight, rpe: p.rpe || hint.rpe });
     } else {
-      out.push({ reps: '', weight: '', rpe: '' });
+      out.push(empty);
     }
+    prev = i;
   });
   return out;
 }
+
+const TYPE_STYLE: Record<SetType, string> = {
+  normal: 'text-gray-600 active:bg-gray-100',
+  warmup: 'bg-amber-100 text-amber-900 active:bg-amber-200',
+  dropset: 'bg-sky-100 text-sky-900 active:bg-sky-200',
+  failure: 'bg-red-100 text-red-800 active:bg-red-200',
+};
 
 const noopSubscribe = () => () => {};
 
@@ -315,6 +335,16 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
     setTimeout(selectAll, 80);
   }
 
+  // Tapping the set number steps through normal, warm-up, drop, failure.
+  function cycleType(blockId: string, setId: string) {
+    patchBlock(blockId, (b) => ({
+      ...b,
+      sets: b.sets.map((s) =>
+        s.id === setId ? { ...s, type: SET_TYPES[(SET_TYPES.indexOf(s.type) + 1) % SET_TYPES.length] } : s
+      ),
+    }));
+  }
+
   function addExercise(ex: ExerciseWithLast) {
     const rows = Math.min(8, Math.max(1, ex.last_sets.length));
     const block: BlockState = {
@@ -415,6 +445,7 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
             reps: parseInt(s.reps, 10),
             weight: bw ? null : parseFloat(s.weight),
             rpe: s.rpe ? parseFloat(s.rpe) : null,
+            set_type: s.type,
           })),
         };
       }),
@@ -590,13 +621,13 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
         )}
       </Card>
 
-      {form.blocks.map((block) => {
+      {form.blocks.map((block, blockIndex) => {
         const ex = byId.get(block.exerciseId);
         if (!ex) return null;
         const hints = placeholdersFor(block, ex.last_sets);
         const cols = ex.is_bodyweight
-          ? 'grid-cols-[1.75rem_1fr_4.5rem_2.75rem]'
-          : 'grid-cols-[1.75rem_1.35fr_1fr_4.5rem_2.75rem]';
+          ? 'grid-cols-[2.5rem_1fr_4.5rem_2.75rem]'
+          : 'grid-cols-[2.5rem_1.35fr_1fr_4.5rem_2.75rem]';
 
         return (
           <div key={block.id} id={`block-${block.id}`} className="scroll-mt-4">
@@ -609,6 +640,11 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
                 {ex.last_sets.length > 0 && (
                   <p className="mt-0.5 text-sm text-gray-600">
                     Last time: {ex.last_sets.map((s) => formatSet(s, ex.is_bodyweight)).join(', ')}
+                  </p>
+                )}
+                {blockIndex === 0 && (
+                  <p className="mt-0.5 text-sm text-gray-600">
+                    Tap a set number to mark it warm-up (W), drop set (D) or failure (F).
                   </p>
                 )}
               </div>
@@ -626,7 +662,17 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
                 const name = `set ${i + 1}, ${ex.name}`;
                 return (
                   <div key={s.id} className={`grid ${cols} items-center gap-1.5`}>
-                    <span className="text-center text-base font-semibold text-gray-600">{i + 1}</span>
+                    <button
+                      type="button"
+                      onClick={() => cycleType(block.id, s.id)}
+                      aria-label={`Set ${i + 1} is ${SET_TYPE_NAMES[s.type].toLowerCase()}, ${ex.name}. Tap to change.`}
+                      className={`flex h-12 w-full items-center justify-center rounded-xl text-base font-bold ${TYPE_STYLE[s.type]}`}
+                    >
+                      <span className="flex flex-col items-center leading-none">
+                        <span>{i + 1}</span>
+                        {s.type !== 'normal' && <span className="mt-0.5 text-[11px]">{SET_TYPE_LETTERS[s.type]}</span>}
+                      </span>
+                    </button>
                     {!ex.is_bodyweight && (
                       <input
                         id={`f-${s.id}-weight`}

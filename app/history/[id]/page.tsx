@@ -4,7 +4,7 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { getSession } from '@/lib/db';
 import { parseId } from '@/lib/http';
-import { capitalize, formatDate, formatDuration, formatSet } from '@/lib/format';
+import { SET_TYPE_NAMES, capitalize, formatDate, formatDuration, formatSet } from '@/lib/format';
 import { Card, Chip, PageHeader } from '../../components/ui';
 import SessionActions from './SessionActions';
 import CoachingPanel from './CoachingPanel';
@@ -36,7 +36,10 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
           <ol className="space-y-1">
             {g.sets.map((s) => (
               <li key={s.id} className="flex justify-between text-base">
-                <span className="text-gray-600">Set {s.set_number}</span>
+                <span className="text-gray-600">
+                  Set {s.set_number}
+                  {s.set_type !== 'normal' && ` · ${SET_TYPE_NAMES[s.set_type]}`}
+                </span>
                 <span className="font-semibold">
                   {formatSet(s, g.is_bodyweight)}
                   {s.rpe !== null && <span className="ml-2 font-normal text-gray-600">RPE {s.rpe}</span>}
