@@ -549,12 +549,6 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
         </div>
       )}
 
-      {!edit && form.blocks.length === 0 && (
-        <button type="button" onClick={() => setPickerOpen(true)} className={`${btn('primary', 'lg')} w-full min-h-20! text-2xl!`}>
-          Add exercise
-        </button>
-      )}
-
       <Card className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <div className="min-w-0">
@@ -799,11 +793,13 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
         );
       })}
 
-      {(edit || form.blocks.length > 0) && (
-        <button type="button" onClick={() => setPickerOpen(true)} className={`${btn('secondary', 'lg')} w-full`}>
-          Add exercise
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={() => setPickerOpen(true)}
+        className={`${btn(!edit && form.blocks.length === 0 ? 'primary' : 'secondary', 'lg')} w-full`}
+      >
+        Add exercise
+      </button>
 
       {error && (
         <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-800">
