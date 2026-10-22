@@ -17,7 +17,7 @@ import {
   readDraft,
   writeDraft,
 } from '@/lib/draftStore';
-import { SET_TYPE_LETTERS, SET_TYPE_NAMES, capitalize, formatClock, formatSet, formatShortDate, formatWeight, todayISO } from '@/lib/format';
+import { SET_TYPE_LETTERS, SET_TYPE_NAMES, capitalize, formatClock, formatSet, formatWeight, todayISO } from '@/lib/format';
 import { restTimer } from '@/lib/hooks/useRestTimer';
 import { useWakeLock } from '@/lib/hooks/useWakeLock';
 import { SET_TYPES } from '@/lib/types';
@@ -242,7 +242,6 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
   const [startedAt, setStartedAt] = useState(init.startedAt);
   const [restored, setRestored] = useState(init.restored);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(!!edit);
   const [attempted, setAttempted] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -408,10 +407,7 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
     if (saving) return;
     setAttempted(true);
     setError('');
-    if (!form.date) {
-      setDetailsOpen(true);
-      return setError('Pick a date.');
-    }
+    if (!form.date) return setError('Pick a date.');
     const blocks = withoutBlankRows(form.blocks);
     if (blocks.length === 0) return setError('Add at least one exercise and fill in a set.');
     if (edit && form.durationMin !== '' && (Number(form.durationMin) < 1 || Number(form.durationMin) > MAX_MINUTES)) {
@@ -559,30 +555,7 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
         </button>
       )}
 
-      {!edit && (
-        <button
-          type="button"
-          aria-expanded={detailsOpen}
-          aria-controls="session-details"
-          onClick={() => setDetailsOpen((o) => !o)}
-          className="flex min-h-14 w-full items-center justify-between gap-3 rounded-2xl bg-gray-50 px-4 text-left active:bg-gray-100"
-        >
-          <span className="min-w-0 truncate text-base text-gray-800">
-            <span className="font-semibold">
-              {form.date === todayISO() ? 'Today' : form.date ? formatShortDate(form.date) : 'No date'}
-            </span>
-            {' · '}
-            {form.label.trim() || 'No label'}
-            {' · '}
-            {timerOn ? `Rest ${formatClock(settings.rest_seconds)}` : 'Rest off'}
-            {form.notes.trim() ? ' · Notes' : ''}
-          </span>
-          <span className="shrink-0 text-base font-semibold text-brand-ink">{detailsOpen ? 'Done' : 'Edit'}</span>
-        </button>
-      )}
-
-      {(edit || detailsOpen) && (
-      <Card id="session-details" className="space-y-3">
+      <Card className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <div className="min-w-0">
             <label htmlFor="s-date" className={labelCls}>
@@ -630,19 +603,6 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
             );
           })}
         </div>
-        <div>
-          <label htmlFor="s-notes" className={labelCls}>
-            Notes
-          </label>
-          <textarea
-            id="s-notes"
-            rows={2}
-            value={form.notes}
-            onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-            maxLength={2000}
-            className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-base focus:border-brand-ink focus:outline-none focus:ring-2 focus:ring-brand/40"
-          />
-        </div>
         {edit && (
           <div>
             <label htmlFor="s-duration" className={labelCls}>
@@ -680,8 +640,20 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
             <Toggle label="Rest timer" checked={timerOn} onChange={toggleTimer} />
           </div>
         )}
+        <div>
+          <label htmlFor="s-notes" className={labelCls}>
+            Notes
+          </label>
+          <textarea
+            id="s-notes"
+            rows={2}
+            value={form.notes}
+            onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+            maxLength={2000}
+            className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-base focus:border-brand-ink focus:outline-none focus:ring-2 focus:ring-brand/40"
+          />
+        </div>
       </Card>
-      )}
 
       {form.blocks.map((block, blockIndex) => {
         const ex = byId.get(block.exerciseId);
