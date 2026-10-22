@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { ButtonLink } from './ui';
 import { DraftAge } from './Elapsed';
 import ConfirmButton from './ConfirmButton';
+import { restTimer } from '@/lib/hooks/useRestTimer';
 import { NEW_DRAFT_KEY, clearDraft, pruneStaleNewDraft, useDraftStart, useHasDraft } from '@/lib/draftStore';
 
 export default function StartSession() {
@@ -36,7 +37,10 @@ export default function StartSession() {
         label="Discard draft"
         confirmLabel="Discard"
         message="Throw away the unsaved session? This can't be undone."
-        onConfirm={() => clearDraft(NEW_DRAFT_KEY)}
+        onConfirm={() => {
+          clearDraft(NEW_DRAFT_KEY);
+          restTimer.dismiss();
+        }}
         variant="secondary"
         className="w-full"
       />
