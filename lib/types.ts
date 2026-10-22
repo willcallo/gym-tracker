@@ -94,6 +94,8 @@ export interface SessionInput {
   label: string | null;
   notes: string | null;
   duration_seconds: number | null;
+  /** Random id made when the draft starts, so a retried save can't create a second session. */
+  client_key: string | null;
   blocks: { exercise_id: number; sets: SetValues[] }[];
 }
 

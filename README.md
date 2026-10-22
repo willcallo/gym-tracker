@@ -31,7 +31,7 @@ npm run dev         # http://localhost:3000
 | --- | --- |
 | `npm run db:init` | Creates tables if missing. Idempotent and non-destructive. |
 | `npm run db:seed` | Adds sample data. Refuses to run if any sessions exist. |
-| `npm run db:reset` | Drops every app table (old and new) and recreates the schema. Destroys all data. |
+| `npm run db:reset` | Drops every app table (old and new) and recreates the schema. Destroys all data. Refuses to touch a non-local database unless you set `ALLOW_RESET=yes`. |
 | `npm run dev:lan` | Dev server on `0.0.0.0` so a phone on your network can reach it. If Next blocks dev assets from your phone's address, add it to `allowedDevOrigins` in `next.config.ts`. |
 | `npm run lint` / `npm run build` | Lint and production build. |
 
@@ -47,7 +47,7 @@ The build needs no network: the Geist font is bundled in `app/fonts`.
 4. **Do not use "Promote to Production" on a preview.** It reuses the preview's build, environment variables and database. Merge instead. If a production deploy turns out to be bad, use Vercel's Instant Rollback: schema changes are additive, so the previous code keeps working.
 
 ### Schema changes are automatic, so keep them safe
-`lib/schema.sql` runs on every Vercel build (previews and production) and on container start. It must stay additive and idempotent: `CREATE ... IF NOT EXISTS`, `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, new columns nullable or with defaults. `npm run db:init` refuses to run if the file contains `DROP`, `TRUNCATE` or `DELETE FROM`. A destructive change needs a deliberate manual migration, not an edit to this file.
+`lib/schema.sql` runs on every Vercel build (previews and production) and on container start. It must stay additive and idempotent: `CREATE ... IF NOT EXISTS`, `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, new columns nullable or with defaults. `npm run db:init` refuses to run if the file contains `DROP`, `TRUNCATE`, `RENAME`, `ALTER COLUMN`, `UPDATE ... SET` or `DELETE FROM`. A destructive change needs a deliberate manual migration, not an edit to this file.
 
 ### One-time setup (Vercel + Neon)
 1. In Neon, create a project. In Vercel, import this repo and set **Production Branch** to `master`.

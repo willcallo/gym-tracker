@@ -1,6 +1,6 @@
 -- Runs automatically on every Vercel build (previews and production) and on container start,
 -- so it must stay additive and idempotent: CREATE ... IF NOT EXISTS, ADD COLUMN IF NOT EXISTS.
--- Never drop, rename or delete here (scripts/db-init.mjs refuses to run if it sees DROP,
+-- Never drop, rename, update or delete here (scripts/db-init.mjs refuses to run if it sees DROP,
 -- TRUNCATE or DELETE FROM). The previous release's code keeps running against the new schema
 -- while a deploy is in flight, so new columns must be nullable or have defaults.
 -- Use `npm run db:reset` to start over locally.
@@ -67,3 +67,7 @@ CREATE TABLE IF NOT EXISTS training_summary (
 ALTER TABLE sessions
   ADD COLUMN IF NOT EXISTS duration_seconds INTEGER
   CHECK (duration_seconds IS NULL OR duration_seconds BETWEEN 1 AND 43200);
+
+-- Lets the app retry a save after a dropped connection without creating a duplicate session.
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS client_key TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS sessions_client_key_idx ON sessions (client_key);
