@@ -74,7 +74,7 @@ try {
     const d = sessions[i];
     const day = ORDER[i % 3];
     const week = Math.floor((sessions[i] - sessions[0]) / (7 * 86400000));
-    const date = d.toISOString().slice(0, 10);
+    const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
     const exIds = [], pos = [], num = [], reps = [], weights = [], rpes = [];
     DAYS[day].forEach((name, p) => {

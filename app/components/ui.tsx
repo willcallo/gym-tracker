@@ -2,7 +2,6 @@ import Link from 'next/link';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost';
 
-// White on #009276 is ~3.9:1, which passes only as large bold text, so primary is always text-lg+.
 export function btn(variant: ButtonVariant = 'primary', size: 'md' | 'lg' = 'md') {
   const base =
     'inline-flex items-center justify-center gap-2 font-semibold select-none transition-colors disabled:opacity-50 disabled:pointer-events-none';
@@ -10,9 +9,10 @@ export function btn(variant: ButtonVariant = 'primary', size: 'md' | 'lg' = 'md'
     md: 'min-h-12 px-5 rounded-xl',
     lg: 'min-h-16 px-6 rounded-2xl',
   };
-  const text = size === 'lg' ? 'text-xl' : variant === 'primary' ? 'text-lg' : 'text-base';
+  const text = size === 'lg' ? 'text-xl' : variant === 'primary' ? '' : 'text-base';
   const variants: Record<ButtonVariant, string> = {
-    primary: 'bg-brand text-white active:bg-brand-ink',
+    // White on #009276 is 3.9:1: fine only for large text, so primary is always bold and 20px or more.
+    primary: 'bg-brand text-xl font-bold text-white active:bg-brand-ink',
     secondary: 'border border-gray-300 bg-white text-gray-900 active:bg-gray-100',
     danger: 'border border-red-300 bg-white text-red-700 active:bg-red-50',
     ghost: 'text-brand-ink active:bg-brand-soft',
