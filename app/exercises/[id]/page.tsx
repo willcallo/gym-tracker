@@ -69,9 +69,9 @@ export default async function ExerciseDetailPage({ params }: { params: Promise<{
                         {p.label && <Chip>{p.label}</Chip>}
                       </span>
                     </div>
-                    <ul className="mt-2 flex flex-wrap gap-1.5">
+                    <ul className="mt-2 grid grid-cols-2 gap-1.5">
                       {p.sets.map((s, i) => (
-                        <li key={i} className="rounded-lg bg-gray-100 px-2.5 py-1 text-sm font-medium tabular-nums">
+                        <li key={i} className="rounded-lg bg-gray-100 px-2.5 py-1.5 text-center text-sm font-medium tabular-nums">
                           {s.set_type !== 'normal' && (
                             <span className="mr-1.5 text-xs font-bold text-gray-600">{SET_TYPE_LETTERS[s.set_type]}</span>
                           )}
