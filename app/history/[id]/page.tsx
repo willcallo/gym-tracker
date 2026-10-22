@@ -4,7 +4,7 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { getSession } from '@/lib/db';
 import { parseId } from '@/lib/http';
-import { SET_TYPE_NAMES, capitalize, formatDate, formatDuration, formatSet } from '@/lib/format';
+import { SET_TYPE_LETTERS, SET_TYPE_NAMES, capitalize, formatDate, formatDuration, formatWeight } from '@/lib/format';
 import { Card, Chip, PageHeader } from '../../components/ui';
 import SessionActions from './SessionActions';
 import CoachingPanel from './CoachingPanel';
@@ -33,20 +33,47 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
             {g.exercise_name}
           </Link>
           <p className="mb-2 text-sm text-gray-600">{capitalize(g.primary_muscle)}</p>
-          <ol className="space-y-1">
-            {g.sets.map((s) => (
-              <li key={s.id} className="flex justify-between text-base">
-                <span className="text-gray-600">
-                  Set {s.set_number}
-                  {s.set_type !== 'normal' && ` · ${SET_TYPE_NAMES[s.set_type]}`}
-                </span>
-                <span className="font-semibold">
-                  {formatSet(s, g.is_bodyweight)}
-                  {s.rpe !== null && <span className="ml-2 font-normal text-gray-600">RPE {s.rpe}</span>}
-                </span>
-              </li>
-            ))}
-          </ol>
+          {(() => {
+            const bw = g.is_bodyweight;
+            const cols = bw ? 'grid-cols-[2.5rem_1fr_4rem]' : 'grid-cols-[2.5rem_1fr_1fr_4rem]';
+            return (
+              <>
+                <div
+                  className={`grid ${cols} gap-2 border-b border-gray-200 pb-1.5 text-right text-xs font-medium text-gray-600`}
+                >
+                  <span className="text-left">Set</span>
+                  {!bw && <span>Weight</span>}
+                  <span>Reps</span>
+                  <span>RPE</span>
+                </div>
+                <ol className="divide-y divide-gray-100">
+                  {g.sets.map((s) => (
+                    <li key={s.id} className={`grid ${cols} items-center gap-2 py-2 text-right text-lg tabular-nums`}>
+                      <span className="flex items-center gap-1 text-left text-base font-semibold text-gray-600">
+                        {s.set_number}
+                        {s.set_type !== 'normal' && (
+                          <span
+                            title={SET_TYPE_NAMES[s.set_type]}
+                            className="rounded bg-gray-100 px-1 text-[11px] font-bold text-gray-700"
+                          >
+                            <span aria-hidden="true">{SET_TYPE_LETTERS[s.set_type]}</span>
+                            <span className="sr-only">{SET_TYPE_NAMES[s.set_type]}</span>
+                          </span>
+                        )}
+                      </span>
+                      {!bw && (
+                        <span className="font-semibold">
+                          {s.weight === null ? '-' : `${formatWeight(s.weight)} kg`}
+                        </span>
+                      )}
+                      <span className="font-semibold">{s.reps}</span>
+                      <span className="text-base text-gray-600">{s.rpe === null ? '' : s.rpe}</span>
+                    </li>
+                  ))}
+                </ol>
+              </>
+            );
+          })()}
         </Card>
       ))}
       <CoachingPanel

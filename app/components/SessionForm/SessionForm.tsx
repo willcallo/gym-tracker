@@ -17,7 +17,7 @@ import {
   readDraft,
   writeDraft,
 } from '@/lib/draftStore';
-import { SET_TYPE_LETTERS, SET_TYPE_NAMES, capitalize, formatClock, formatSet, formatWeight, todayISO } from '@/lib/format';
+import { SET_TYPE_LETTERS, SET_TYPE_NAMES, capitalize, formatClock, formatSet, formatShortDate, formatWeight, todayISO } from '@/lib/format';
 import { restTimer } from '@/lib/hooks/useRestTimer';
 import { useWakeLock } from '@/lib/hooks/useWakeLock';
 import { SET_TYPES } from '@/lib/types';
@@ -208,6 +208,8 @@ const TYPE_STYLE: Record<SetType, string> = {
   failure: 'bg-red-100 text-red-800 active:bg-red-200',
 };
 
+const LABEL_SHORTCUTS = ['Push', 'Pull', 'Legs', 'Upper', 'Lower'];
+
 const noopSubscribe = () => () => {};
 
 export default function SessionForm(props: Props) {
@@ -240,6 +242,7 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
   const [startedAt, setStartedAt] = useState(init.startedAt);
   const [restored, setRestored] = useState(init.restored);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(!!edit);
   const [attempted, setAttempted] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -405,7 +408,10 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
     if (saving) return;
     setAttempted(true);
     setError('');
-    if (!form.date) return setError('Pick a date.');
+    if (!form.date) {
+      setDetailsOpen(true);
+      return setError('Pick a date.');
+    }
     const blocks = withoutBlankRows(form.blocks);
     if (blocks.length === 0) return setError('Add at least one exercise and fill in a set.');
     if (edit && form.durationMin !== '' && (Number(form.durationMin) < 1 || Number(form.durationMin) > MAX_MINUTES)) {
@@ -547,7 +553,36 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
         </div>
       )}
 
-      <Card className="space-y-3">
+      {!edit && form.blocks.length === 0 && (
+        <button type="button" onClick={() => setPickerOpen(true)} className={`${btn('primary', 'lg')} w-full min-h-20! text-2xl!`}>
+          Add exercise
+        </button>
+      )}
+
+      {!edit && (
+        <button
+          type="button"
+          aria-expanded={detailsOpen}
+          aria-controls="session-details"
+          onClick={() => setDetailsOpen((o) => !o)}
+          className="flex min-h-14 w-full items-center justify-between gap-3 rounded-2xl bg-gray-50 px-4 text-left active:bg-gray-100"
+        >
+          <span className="min-w-0 truncate text-base text-gray-800">
+            <span className="font-semibold">
+              {form.date === todayISO() ? 'Today' : form.date ? formatShortDate(form.date) : 'No date'}
+            </span>
+            {' · '}
+            {form.label.trim() || 'No label'}
+            {' · '}
+            {timerOn ? `Rest ${formatClock(settings.rest_seconds)}` : 'Rest off'}
+            {form.notes.trim() ? ' · Notes' : ''}
+          </span>
+          <span className="shrink-0 text-base font-semibold text-brand-ink">{detailsOpen ? 'Done' : 'Edit'}</span>
+        </button>
+      )}
+
+      {(edit || detailsOpen) && (
+      <Card id="session-details" className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <div className="min-w-0">
             <label htmlFor="s-date" className={labelCls}>
@@ -574,6 +609,26 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
               className={inputCls}
             />
           </div>
+        </div>
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Label shortcuts">
+          {LABEL_SHORTCUTS.map((l) => {
+            const on = form.label === l;
+            return (
+              <button
+                key={l}
+                type="button"
+                aria-pressed={on}
+                onClick={() => setForm((f) => ({ ...f, label: on ? '' : l }))}
+                className={`min-h-12 rounded-xl border px-4 text-base font-semibold ${
+                  on
+                    ? 'border-brand-ink bg-brand-soft text-brand-ink'
+                    : 'border-gray-300 bg-white text-gray-900 active:bg-gray-100'
+                }`}
+              >
+                {l}
+              </button>
+            );
+          })}
         </div>
         <div>
           <label htmlFor="s-notes" className={labelCls}>
@@ -626,6 +681,7 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
           </div>
         )}
       </Card>
+      )}
 
       {form.blocks.map((block, blockIndex) => {
         const ex = byId.get(block.exerciseId);
@@ -666,13 +722,21 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
               {block.sets.map((s, i) => {
                 const hint = hints[i];
                 const name = `set ${i + 1}, ${ex.name}`;
+                const done = !edit && repsOk(s.reps) && (ex.is_bodyweight || weightOk(s.weight));
                 return (
-                  <div key={s.id} className={`grid ${cols} items-center gap-1.5`}>
+                  <div
+                    key={s.id}
+                    className={`-mx-1.5 grid ${cols} items-center gap-1.5 rounded-xl p-1.5 transition-colors ${
+                      done ? 'bg-brand-soft' : ''
+                    }`}
+                  >
                     <button
                       type="button"
                       onClick={() => cycleType(block.id, s.id)}
                       aria-label={`Set ${i + 1} is ${SET_TYPE_NAMES[s.type].toLowerCase()}, ${ex.name}. Tap to change.`}
-                      className={`flex h-12 w-full items-center justify-center rounded-xl text-base font-bold ${TYPE_STYLE[s.type]}`}
+                      className={`flex h-12 w-full items-center justify-center rounded-xl text-base font-bold ${
+                        s.type === 'normal' && done ? 'text-brand-ink' : TYPE_STYLE[s.type]
+                      }`}
                     >
                       <span className="flex flex-col items-center leading-none">
                         <span>{i + 1}</span>
@@ -763,9 +827,11 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
         );
       })}
 
-      <button type="button" onClick={() => setPickerOpen(true)} className={`${btn('secondary', 'lg')} w-full`}>
-        Add exercise
-      </button>
+      {(edit || form.blocks.length > 0) && (
+        <button type="button" onClick={() => setPickerOpen(true)} className={`${btn('secondary', 'lg')} w-full`}>
+          Add exercise
+        </button>
+      )}
 
       {error && (
         <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-800">
