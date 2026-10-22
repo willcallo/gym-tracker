@@ -199,12 +199,22 @@ export async function deleteSession(id: number): Promise<boolean> {
   return (rowCount ?? 0) > 0;
 }
 
-export async function saveCoachingNote(id: number, note: string): Promise<boolean> {
+// `basedOnUpdatedAt` is the session's updated_at when the note was requested. If the session was
+// edited while the AI was thinking, the note is saved but stays flagged as out of date. The value
+// arrives with millisecond precision while the column has microseconds, hence the 1ms margin.
+export async function saveCoachingNote(id: number, note: string, basedOnUpdatedAt: string): Promise<boolean> {
   const { rowCount } = await pool.query(
-    'UPDATE sessions SET coaching_note = $2, coaching_at = now(), coaching_stale = false WHERE id = $1',
-    [id, note]
+    `UPDATE sessions
+     SET coaching_note = $2, coaching_at = now(), coaching_stale = (updated_at >= $3::timestamptz + interval '1 millisecond')
+     WHERE id = $1`,
+    [id, note, basedOnUpdatedAt]
   );
   return (rowCount ?? 0) > 0;
+}
+
+export async function getSessionUpdatedAt(id: number): Promise<string | null> {
+  const { rows } = await pool.query('SELECT updated_at FROM sessions WHERE id = $1', [id]);
+  return (rows[0]?.updated_at as string) ?? null;
 }
 
 // ── Exercises ────────────────────────────────────────────────
@@ -404,6 +414,9 @@ export async function getCoachingContext(session: {
 export interface SummaryContext {
   sessionCount: number;
   recentSessions: number;
+  /** First and last date among the recent sessions, so the model can judge frequency. */
+  recentFrom: string | null;
+  recentTo: string | null;
   muscles: { muscle: string; sets: number }[];
   prs: { name: string; is_bodyweight: boolean; best: number }[];
 }
@@ -434,9 +447,15 @@ export async function getSummaryContext(): Promise<SummaryContext> {
        ), '[]'::json) AS prs`
   );
   const r = rows[0];
+  const range = await pool.query(
+    `SELECT min(date) AS from_date, max(date) AS to_date
+     FROM (SELECT date FROM sessions ORDER BY date DESC, id DESC LIMIT 10) r`
+  );
   return {
     sessionCount: r.session_count,
     recentSessions: r.recent_sessions,
+    recentFrom: range.rows[0]?.from_date ?? null,
+    recentTo: range.rows[0]?.to_date ?? null,
     muscles: r.muscles,
     prs: r.prs,
   };
