@@ -41,13 +41,19 @@ export function ButtonLink({
 }
 
 export function Card({
+  id,
   className = '',
   children,
 }: {
+  id?: string;
   className?: string;
   children: React.ReactNode;
 }) {
-  return <div className={`rounded-2xl border border-gray-200 bg-white p-4 ${className}`}>{children}</div>;
+  return (
+    <div id={id} className={`rounded-2xl border border-gray-200 bg-white p-4 ${className}`}>
+      {children}
+    </div>
+  );
 }
 
 export function PageHeader({
