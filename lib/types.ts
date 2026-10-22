@@ -24,10 +24,15 @@ export interface Exercise {
   secondary_muscle: MuscleGroup | null;
 }
 
+export const SET_TYPES = ['normal', 'warmup', 'dropset', 'failure'] as const;
+
+export type SetType = (typeof SET_TYPES)[number];
+
 export interface SetValues {
   reps: number;
   weight: number | null;
   rpe: number | null;
+  set_type: SetType;
 }
 
 interface SessionSet extends SetValues {

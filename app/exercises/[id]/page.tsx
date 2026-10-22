@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getExerciseDetail } from '@/lib/db';
 import { parseId } from '@/lib/http';
-import { capitalize, formatDate, formatPR, formatSet } from '@/lib/format';
+import { SET_TYPE_LETTERS, capitalize, formatDate, formatPR, formatSet } from '@/lib/format';
 import { Card, Chip, EmptyState, PageHeader, SectionTitle } from '../../components/ui';
 import ProgressChart from './ProgressChart';
 import ExerciseEditor from './ExerciseEditor';
@@ -72,6 +72,9 @@ export default async function ExerciseDetailPage({ params }: { params: Promise<{
                     <ul className="mt-2 flex flex-wrap gap-1.5">
                       {p.sets.map((s, i) => (
                         <li key={i} className="rounded-lg bg-gray-100 px-2.5 py-1 text-sm font-medium tabular-nums">
+                          {s.set_type !== 'normal' && (
+                            <span className="mr-1.5 text-xs font-bold text-gray-600">{SET_TYPE_LETTERS[s.set_type]}</span>
+                          )}
                           {formatSet(s, exercise.is_bodyweight)}
                           {s.rpe !== null && <span className="ml-1.5 font-normal text-gray-600">@{s.rpe}</span>}
                         </li>

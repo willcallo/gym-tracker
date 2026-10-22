@@ -1,3 +1,5 @@
+import type { SetType } from './types';
+
 function parseDate(date: string): Date {
   const [y, m, d] = date.split('-').map(Number);
   return new Date(y, m - 1, d);
@@ -69,4 +71,19 @@ export function formatDuration(totalSeconds: number): string {
   const h = Math.floor(mins / 60);
   const m = mins % 60;
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+export const SET_TYPE_NAMES: Record<SetType, string> = {
+  normal: 'Normal',
+  warmup: 'Warm-up',
+  dropset: 'Drop set',
+  failure: 'Failure',
+};
+
+export const SET_TYPE_LETTERS: Record<SetType, string> = { normal: '', warmup: 'W', dropset: 'D', failure: 'F' };
+
+// What goes in the set column: W, D or F for the special types, and a count of normal sets for the rest.
+export function setLabels(sets: { set_type: SetType }[]): string[] {
+  let n = 0;
+  return sets.map((s) => (s.set_type === 'normal' ? String(++n) : SET_TYPE_LETTERS[s.set_type]));
 }

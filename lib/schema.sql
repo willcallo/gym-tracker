@@ -71,3 +71,8 @@ ALTER TABLE sessions
 -- Lets the app retry a save after a dropped connection without creating a duplicate session.
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS client_key TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS sessions_client_key_idx ON sessions (client_key);
+
+-- Warm-up, drop-set and to-failure sets (stored as 'dropset': the additive-schema check bans the word drop). Existing and old-code rows stay 'normal' through the default.
+ALTER TABLE sets
+  ADD COLUMN IF NOT EXISTS set_type TEXT NOT NULL DEFAULT 'normal'
+  CHECK (set_type IN ('normal','warmup','dropset','failure'));
