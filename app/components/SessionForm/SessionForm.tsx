@@ -253,6 +253,12 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
 
   const byId = useMemo(() => new Map(exercises.map((e) => [e.id, e])), [exercises]);
 
+  // A brand new session starts with no rest timer, so a countdown left over from a discarded or
+  // pruned draft can't show up before the first set is done.
+  useEffect(() => {
+    if (!edit && !init.restored && !hasContent(init.form)) restTimer.dismiss();
+  }, [edit, init.restored, init.form]);
+
   // ── Autosave ──────────────────────────────────────────────
   const savedRef = useRef(false);
   const formRef = useRef(form);
