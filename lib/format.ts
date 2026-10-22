@@ -14,6 +14,20 @@ export function formatDate(date: string): string {
   });
 }
 
+export function dateParts(date: string): { weekday: string; day: string; month: string } {
+  const d = parseDate(date);
+  return {
+    weekday: d.toLocaleDateString('en-GB', { weekday: 'short' }),
+    day: String(d.getDate()),
+    month: d.toLocaleDateString('en-GB', { month: 'short' }),
+  };
+}
+
+// Whole calendar days from `date` to `today`, both 'YYYY-MM-DD'. 0 is today.
+export function daysSince(date: string, today: string): number {
+  return Math.round((parseDate(today).getTime() - parseDate(date).getTime()) / 86_400_000);
+}
+
 export function formatShortDate(date: string): string {
   return parseDate(date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 }

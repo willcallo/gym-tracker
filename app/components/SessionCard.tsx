@@ -1,35 +1,44 @@
 import Link from 'next/link';
-import { formatDate, formatDuration } from '@/lib/format';
+import { dateParts, formatDate, formatDuration } from '@/lib/format';
 import { Chip } from './ui';
 import type { SessionWithSets } from '@/lib/types';
 
 export default function SessionCard({ session }: { session: SessionWithSets }) {
-  // Warm-ups are not counted: the number is meant to say how much work the session was.
   const totalSets = session.exercises.reduce((n, e) => n + e.sets.filter((s) => s.set_type !== 'warmup').length, 0);
   const names = session.exercises.map((e) => e.exercise_name);
   const shown = names.slice(0, 3).join(', ');
   const more = names.length > 3 ? ` +${names.length - 3} more` : '';
+  const d = dateParts(session.date);
 
   return (
     <Link
       href={`/history/${session.id}`}
-      className="block rounded-2xl border border-gray-200 bg-white p-4 active:bg-gray-50"
+      className="flex gap-3 rounded-2xl border border-gray-200 bg-white p-3 active:bg-gray-50"
     >
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-base font-semibold">{formatDate(session.date)}</span>
-        {session.label && <Chip tone="brand">{session.label}</Chip>}
+      <span className="sr-only">{formatDate(session.date)}</span>
+      <div
+        aria-hidden="true"
+        className="flex w-16 shrink-0 flex-col items-center justify-center rounded-xl bg-gray-50 py-2 leading-none"
+      >
+        <span className="text-xs font-medium uppercase tracking-wide text-gray-600">{d.weekday}</span>
+        <span className="mt-1 text-3xl font-bold tabular-nums text-gray-900">{d.day}</span>
+        <span className="mt-1 text-xs font-medium uppercase tracking-wide text-gray-600">{d.month}</span>
       </div>
-      <p className="mt-1 text-sm text-gray-700">
-        {session.exercises.length} exercise{session.exercises.length === 1 ? '' : 's'} · {totalSets} set
-        {totalSets === 1 ? '' : 's'}
-        {session.duration_seconds ? ` · ${formatDuration(session.duration_seconds)}` : ''}
-      </p>
-      {shown && (
-        <p className="mt-0.5 truncate text-sm text-gray-600">
-          {shown}
-          {more}
+      <div className="min-w-0 flex-1 py-0.5">
+        <div className="flex items-start justify-between gap-2">
+          <p className="line-clamp-2 text-base font-semibold leading-snug text-gray-900">{shown || 'No exercises'}{more}</p>
+          {session.label && <Chip tone="brand">{session.label}</Chip>}
+        </div>
+        <p className="mt-1.5 text-sm text-gray-700">
+          <span className="font-semibold tabular-nums">{totalSets}</span> set{totalSets === 1 ? '' : 's'}
+          {session.duration_seconds ? (
+            <>
+              {' · '}
+              <span className="font-semibold tabular-nums">{formatDuration(session.duration_seconds)}</span>
+            </>
+          ) : null}
         </p>
-      )}
+      </div>
     </Link>
   );
 }
