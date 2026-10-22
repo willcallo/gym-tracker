@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import { ButtonLink } from './ui';
-import Elapsed from './Elapsed';
+import { DraftAge } from './Elapsed';
 import ConfirmButton from './ConfirmButton';
 import { NEW_DRAFT_KEY, clearDraft, pruneStaleNewDraft, useDraftStart, useHasDraft } from '@/lib/draftStore';
 
@@ -26,11 +26,7 @@ export default function StartSession() {
     <div className="space-y-3">
       <p className="text-sm text-gray-700">
         You have an unsaved session in progress
-        {startedAt !== null && (
-          <>
-            : <Elapsed since={startedAt} className="font-semibold text-brand-ink" />
-          </>
-        )}
+        {startedAt !== null && <DraftAge since={startedAt} />}
         .
       </p>
       <ButtonLink href="/log" size="lg" className="w-full min-h-24! text-2xl!">

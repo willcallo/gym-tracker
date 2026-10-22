@@ -56,6 +56,10 @@ function getAudio(): HTMLAudioElement | null {
   return audio;
 }
 
+export function isBeepUnlocked() {
+  return unlocked;
+}
+
 // Browsers only let media play from a user gesture the first time. Call this from one.
 export function unlockBeep() {
   if (unlocked) return;
