@@ -21,7 +21,7 @@ function ago(days: number): string {
 // Today comes from the phone's clock, so this renders after mount.
 export default function HomeStatus({ dates, lastLabel }: { dates: string[]; lastLabel: string | null }) {
   const today = useSyncExternalStore(noopSubscribe, todayISO, () => '');
-  if (!today || dates.length === 0) return <div className="h-0" aria-hidden="true" />;
+  if (!today) return <div className="h-0" aria-hidden="true" />;
 
   const [y, m, d] = today.split('-').map(Number);
   const now = new Date(y, m - 1, d);
@@ -29,12 +29,18 @@ export default function HomeStatus({ dates, lastLabel }: { dates: string[]; last
   const week = Array.from({ length: 7 }, (_, i) => isoFromLocal(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i)));
   const trained = new Set(dates);
   const count = week.filter((w) => trained.has(w)).length;
-  const since = daysSince(dates[0], today);
+  const since = dates.length > 0 ? daysSince(dates[0], today) : null;
 
   return (
     <section aria-label="This week" className="rounded-2xl bg-gray-50 p-4">
       <p className="text-base text-gray-800">
-        <span className="font-semibold">Last: {lastLabel ?? 'Session'}</span>, {ago(since)}
+        {since === null ? (
+          <span className="font-semibold">No sessions yet</span>
+        ) : (
+          <>
+            <span className="font-semibold">Last: {lastLabel ?? 'Session'}</span>, {ago(since)}
+          </>
+        )}
       </p>
       <ol className="mt-3 grid grid-cols-7 gap-1.5">
         {week.map((w, i) => {
