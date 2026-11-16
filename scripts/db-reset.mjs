@@ -1,7 +1,9 @@
 import { connect, applySchema } from './_db.mjs';
 
 // Drops every table this app has ever used (old and new shapes), then recreates the schema.
-const TABLES = ['sets', 'sessions', 'exercises', 'settings', 'training_summary', 'user_settings', 'dashboard_cache'];
+const TABLES = ['sets', 'sessions', 'exercises', 'settings', 'training_summary', 'user_settings', 'dashboard_cache',
+  // Auth tables. Quoted: "user" is a reserved word and Better Auth's names are case-sensitive.
+  '"rateLimit"', '"verification"', '"account"', '"session"', '"user"'];
 
 // Wiping a remote database by accident (say, after pulling production env vars) is the one
 // mistake this script must not allow. Local databases are fine; anything else needs ALLOW_RESET=yes.

@@ -5,6 +5,67 @@
 -- while a deploy is in flight, so new columns must be nullable or have defaults.
 -- Use `npm run db:reset` to start over locally.
 
+-- Accounts and login sessions, in the shape Better Auth expects (its column names are camelCase,
+-- so they need quoting). Regenerate with `npx auth@latest generate` after changing lib/auth.ts
+-- in a way that touches its tables, and copy any new columns in here by hand.
+CREATE TABLE IF NOT EXISTS "user" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "name" TEXT NOT NULL,
+  "email" TEXT NOT NULL UNIQUE,
+  "emailVerified" BOOLEAN NOT NULL,
+  "image" TEXT,
+  "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS "session" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "expiresAt" TIMESTAMPTZ NOT NULL,
+  "token" TEXT NOT NULL UNIQUE,
+  "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMPTZ NOT NULL,
+  "ipAddress" TEXT,
+  "userAgent" TEXT,
+  "userId" TEXT NOT NULL REFERENCES "user" ("id") ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS "session_userId_idx" ON "session" ("userId");
+
+-- One row per way of signing in. For email + password the hash lives in "password".
+CREATE TABLE IF NOT EXISTS "account" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "accountId" TEXT NOT NULL,
+  "providerId" TEXT NOT NULL,
+  "userId" TEXT NOT NULL REFERENCES "user" ("id") ON DELETE CASCADE,
+  "accessToken" TEXT,
+  "refreshToken" TEXT,
+  "idToken" TEXT,
+  "accessTokenExpiresAt" TIMESTAMPTZ,
+  "refreshTokenExpiresAt" TIMESTAMPTZ,
+  "scope" TEXT,
+  "password" TEXT,
+  "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS "account_userId_idx" ON "account" ("userId");
+
+CREATE TABLE IF NOT EXISTS "verification" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "identifier" TEXT NOT NULL,
+  "value" TEXT NOT NULL,
+  "expiresAt" TIMESTAMPTZ NOT NULL,
+  "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS "verification_identifier_idx" ON "verification" ("identifier");
+
+-- Counters for login rate limiting.
+CREATE TABLE IF NOT EXISTS "rateLimit" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "key" TEXT NOT NULL UNIQUE,
+  "count" INTEGER NOT NULL,
+  "lastRequest" BIGINT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS exercises (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   name TEXT NOT NULL CHECK (length(btrim(name)) BETWEEN 1 AND 80),

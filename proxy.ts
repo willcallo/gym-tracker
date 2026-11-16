@@ -1,21 +1,17 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { COOKIE_NAME, authEnabled, authMisconfigured, verifySessionToken } from '@/lib/auth';
+import { getSessionCookie } from 'better-auth/cookies';
 
-const PUBLIC_PATHS = new Set(['/login', '/api/login']);
+const PUBLIC_PATHS = new Set(['/login']);
 
+// An optimistic check only: it sees whether a session cookie is present, not whether it is valid.
+// It exists to send signed-out visitors to /login without a database query on every request.
+// The real check happens next to the data, in each page and API route.
 export function proxy(request: NextRequest) {
-  if (authMisconfigured()) {
-    const message = 'APP_PASSWORD is not set. Set it (or AUTH_DISABLED=1 for a private run) and redeploy.';
-    if (request.nextUrl.pathname.startsWith('/api/')) return Response.json({ error: message }, { status: 503 });
-    return new Response(message, { status: 503 });
-  }
-  if (!authEnabled()) return NextResponse.next();
-
   const { pathname, search } = request.nextUrl;
-  if (PUBLIC_PATHS.has(pathname)) return NextResponse.next();
+  if (PUBLIC_PATHS.has(pathname) || pathname.startsWith('/api/auth/')) return NextResponse.next();
 
-  if (verifySessionToken(request.cookies.get(COOKIE_NAME)?.value)) return NextResponse.next();
+  if (getSessionCookie(request)) return NextResponse.next();
 
   if (pathname.startsWith('/api/')) {
     return Response.json({ error: 'Unauthorised' }, { status: 401 });

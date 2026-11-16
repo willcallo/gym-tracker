@@ -19,7 +19,7 @@ types.setTypeParser(1184, (v: string) => new Date(v).toISOString());
 
 // Cached on globalThis so dev hot reloads don't leak pools.
 const g = globalThis as unknown as { __gymPool?: Pool; __gymPoolHandled?: boolean };
-const pool =
+export const pool =
   g.__gymPool ??
   (g.__gymPool = new Pool({
     connectionString: process.env.DATABASE_URL,

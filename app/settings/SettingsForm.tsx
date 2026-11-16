@@ -5,16 +5,11 @@ import { btn, Card, SectionTitle } from '../components/ui';
 import Toggle from '../components/Toggle';
 import { formatClock } from '@/lib/format';
 import type { Settings } from '@/lib/types';
+import { authClient } from '@/lib/auth-client';
 
 const PRESETS = [60, 90, 120, 180];
 
-export default function SettingsForm({
-  initial,
-  canSignOut,
-}: {
-  initial: Settings;
-  canSignOut: boolean;
-}) {
+export default function SettingsForm({ initial }: { initial: Settings }) {
   const [settings, setSettings] = useState(initial);
   const [error, setError] = useState('');
 
@@ -41,7 +36,7 @@ export default function SettingsForm({
   }
 
   async function signOut() {
-    await fetch('/api/logout', { method: 'POST' });
+    await authClient.signOut().catch(() => {});
     window.location.assign('/login');
   }
 
@@ -107,14 +102,12 @@ export default function SettingsForm({
         </Card>
       </section>
 
-      {canSignOut && (
-        <section>
-          <SectionTitle>Account</SectionTitle>
-          <button type="button" onClick={signOut} className={`${btn('secondary')} w-full`}>
-            Sign out
-          </button>
-        </section>
-      )}
+      <section>
+        <SectionTitle>Account</SectionTitle>
+        <button type="button" onClick={signOut} className={`${btn('secondary')} w-full`}>
+          Sign out
+        </button>
+      </section>
     </div>
   );
 }
