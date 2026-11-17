@@ -1,28 +1,47 @@
+import fs from 'node:fs';
 import { connect } from './_db.mjs';
 
-// Sample data: ~10 weeks of push / pull / legs with slow progression.
-// Refuses to run if sessions already exist, so it can't duplicate or clobber real data.
+// Sample data for one account: ~10 weeks of push / pull / legs with slow progression.
+//   npm run db:seed -- you@example.com
+// The account must already exist (sign up in the app first). Refuses to run if that account
+// already has sessions, so it can't duplicate or clobber real data.
 
-const EXERCISES = [
-  // name, primary, secondary, bodyweight, start weight, step per week
-  ['Bench Press', 'chest', 'triceps', false, 70, 1.25],
-  ['Overhead Press', 'shoulders', 'triceps', false, 40, 1],
-  ['Incline Dumbbell Press', 'chest', 'shoulders', false, 24, 0.5],
-  ['Lateral Raise', 'shoulders', null, false, 10, 0.25],
-  ['Triceps Pushdown', 'triceps', null, false, 30, 1],
-  ['Dips', 'chest', 'triceps', true, 0, 0],
-  ['Barbell Row', 'upper back', 'biceps', false, 60, 1.25],
-  ['Lat Pulldown', 'lats', 'biceps', false, 55, 1.25],
-  ['Pull-ups', 'lats', 'biceps', true, 0, 0],
-  ['Face Pull', 'upper back', 'shoulders', false, 20, 0.5],
-  ['Dumbbell Curl', 'biceps', null, false, 12, 0.25],
-  ['Back Squat', 'quads', 'glutes', false, 90, 2.5],
-  ['Romanian Deadlift', 'hamstrings', 'glutes', false, 80, 2.5],
-  ['Leg Press', 'quads', 'glutes', false, 150, 5],
-  ['Calf Raise', 'calves', null, false, 60, 2.5],
-  ['Hanging Leg Raise', 'core', null, true, 0, 0],
-  ['Cable Fly', 'chest', null, false, 15, 0.5], // never logged, shows up at the bottom
-];
+const email = (process.argv[2] ?? process.env.SEED_EMAIL ?? '').trim().toLowerCase();
+if (!email) {
+  console.error('Which account? Run `npm run db:seed -- you@example.com` (sign up in the app first).');
+  process.exit(1);
+}
+
+// The same list every new account starts with.
+const STARTER = JSON.parse(fs.readFileSync(new URL('../lib/starter-exercises.json', import.meta.url), 'utf8'));
+
+// Starting weight and weekly step for each lift, used only to invent plausible history.
+const PROGRESSION = {
+  'Bench Press': [70, 1.25],
+  'Overhead Press': [40, 1],
+  'Incline Dumbbell Press': [24, 0.5],
+  'Lateral Raise': [10, 0.25],
+  'Triceps Pushdown': [30, 1],
+  'Dips': [0, 0],
+  'Barbell Row': [60, 1.25],
+  'Lat Pulldown': [55, 1.25],
+  'Pull-ups': [0, 0],
+  'Face Pull': [20, 0.5],
+  'Dumbbell Curl': [12, 0.25],
+  'Back Squat': [90, 2.5],
+  'Romanian Deadlift': [80, 2.5],
+  'Leg Press': [150, 5],
+  'Calf Raise': [60, 2.5],
+  'Hanging Leg Raise': [0, 0],
+  'Cable Fly': [15, 0.5],
+};
+const EXERCISES = STARTER.map((e) => [
+  e.name,
+  e.primary_muscle,
+  e.secondary_muscle,
+  e.is_bodyweight,
+  ...(PROGRESSION[e.name] ?? [20, 0.5]),
+]);
 
 const DAYS = {
   Push: ['Bench Press', 'Overhead Press', 'Incline Dumbbell Press', 'Lateral Raise', 'Triceps Pushdown', 'Dips'],
@@ -38,9 +57,17 @@ const round = (n, step) => Math.round(n / step) * step;
 const client = connect();
 await client.connect();
 try {
-  const { rows: existing } = await client.query('SELECT count(*)::int AS n FROM sessions');
+  const { rows: users } = await client.query('SELECT id FROM "user" WHERE lower(email) = $1', [email]);
+  if (!users[0]) {
+    console.error(`No account with the email ${email}. Sign up in the app first, then run this again.`);
+    process.exit(1);
+  }
+  const userId = users[0].id;
+  const { rows: existing } = await client.query('SELECT count(*)::int AS n FROM sessions WHERE user_id = $1', [
+    userId,
+  ]);
   if (existing[0].n > 0) {
-    console.log('Sessions already exist, not seeding. Run `npm run db:reset` first for a clean slate.');
+    console.log(`${email} already has sessions, not seeding.`);
     process.exit(0);
   }
   await client.query('BEGIN');
@@ -49,9 +76,9 @@ try {
   const meta = new Map();
   for (const [name, primary, secondary, bw, start, step] of EXERCISES) {
     const { rows } = await client.query(
-      `INSERT INTO exercises (name, primary_muscle, secondary_muscle, is_bodyweight)
-       VALUES ($1,$2,$3,$4) ON CONFLICT (lower(name)) DO UPDATE SET name = EXCLUDED.name RETURNING id`,
-      [name, primary, secondary, bw]
+      `INSERT INTO exercises (user_id, name, primary_muscle, secondary_muscle, is_bodyweight)
+       VALUES ($5,$1,$2,$3,$4) ON CONFLICT (user_id, lower(name)) DO UPDATE SET name = EXCLUDED.name RETURNING id`,
+      [name, primary, secondary, bw, userId]
     );
     ids.set(name, rows[0].id);
     meta.set(name, { bw, start, step });
@@ -100,27 +127,28 @@ try {
     first = false;
 
     const { rows } = await client.query(
-      'INSERT INTO sessions (date, label, notes, duration_seconds) VALUES ($1,$2,$3,$4) RETURNING id',
-      [date, day, note, rand() < 0.15 ? null : (45 + Math.floor(rand() * 36)) * 60 + Math.floor(rand() * 60)]
+      'INSERT INTO sessions (user_id, date, label, notes, duration_seconds) VALUES ($5,$1,$2,$3,$4) RETURNING id',
+      [date, day, note, rand() < 0.15 ? null : (45 + Math.floor(rand() * 36)) * 60 + Math.floor(rand() * 60), userId]
     );
     await client.query(
-      `INSERT INTO sets (session_id, exercise_id, exercise_position, set_number, reps, weight, rpe)
-       SELECT $7::int, * FROM unnest($1::int[], $2::int[], $3::int[], $4::int[], $5::numeric[], $6::numeric[])`,
-      [exIds, pos, num, reps, weights, rpes, rows[0].id]
+      `INSERT INTO sets (user_id, session_id, exercise_id, exercise_position, set_number, reps, weight, rpe)
+       SELECT $8::text, $7::int, * FROM unnest($1::int[], $2::int[], $3::int[], $4::int[], $5::numeric[], $6::numeric[])`,
+      [exIds, pos, num, reps, weights, rpes, rows[0].id, userId]
     );
   }
 
   // One stored coaching note, so the session page shows both states.
   await client.query(
     `UPDATE sessions SET coaching_at = now(), coaching_note = $1
-     WHERE id = (SELECT id FROM sessions ORDER BY date DESC, id DESC OFFSET 1 LIMIT 1)`,
+     WHERE id = (SELECT id FROM sessions WHERE user_id = $2 ORDER BY date DESC, id DESC OFFSET 1 LIMIT 1)`,
     [
       "1. Effort & quality: RPE sat at 8-9 on the main lifts, which is right. Accessories looked easy.\n\n2. Progression: Small weight bumps across the board, nothing stalled.\n\n3. Balance & gaps: Pulling volume is keeping up with pushing. Calves are the only thing getting ignored.\n\n4. Next session focus: Add a set of calf raises and push the top set of your first lift by one rep.",
+      userId,
     ]
   );
 
   await client.query('COMMIT');
-  console.log(`Seeded ${EXERCISES.length} exercises and ${sessions.length} sessions.`);
+  console.log(`Seeded ${sessions.length} sessions for ${email}.`);
 } catch (e) {
   await client.query('ROLLBACK');
   throw e;

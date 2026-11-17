@@ -24,14 +24,14 @@ You need Node 20+ and a Postgres database.
 npm install
 echo 'DATABASE_URL=postgres://user:pass@localhost:5432/gym' > .env.local
 npm run db:init     # create the tables (safe to repeat)
-npm run db:seed     # optional: about 10 weeks of sample sessions
-npm run dev         # http://localhost:3000
+npm run dev         # http://localhost:3000, then create an account
+npm run db:seed -- you@example.com   # optional: about 10 weeks of sample sessions for that account
 ```
 
 | Script | What it does |
 | --- | --- |
 | `npm run db:init` | Creates tables if missing. Idempotent and non-destructive. |
-| `npm run db:seed` | Adds sample data. Refuses to run if any sessions exist. |
+| `npm run db:seed -- <email>` | Adds sample sessions to that account (sign up first). Refuses to run if the account already has sessions. |
 | `npm run db:reset` | Drops every app table (old and new) and recreates the schema. Destroys all data. Refuses to touch a non-local database unless you set `ALLOW_RESET=yes`. |
 | `npm run dev:lan` | Dev server on `0.0.0.0` so a phone on your network can reach it. If Next blocks dev assets from your phone's address, add it to `allowedDevOrigins` in `next.config.ts`. |
 | `npm run lint` / `npm run build` | Lint and production build. |

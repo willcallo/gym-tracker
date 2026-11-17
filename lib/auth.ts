@@ -2,7 +2,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { betterAuth } from 'better-auth';
 import { APIError, createAuthMiddleware } from 'better-auth/api';
 import { nextCookies } from 'better-auth/next-js';
-import { pool } from './db';
+import { addStarterExercises, pool } from './db';
 
 function sha256(value: string): Buffer {
   return createHash('sha256').update(value).digest();
@@ -52,6 +52,21 @@ export const auth = betterAuth({
         throw new APIError('FORBIDDEN', { message: 'That invite code is not right' });
       }
     }),
+  },
+  databaseHooks: {
+    user: {
+      create: {
+        // A new account starts with the standard exercise list. If this fails the account still
+        // works, it just starts empty, so the error is logged rather than failing the sign-up.
+        after: async (user) => {
+          try {
+            await addStarterExercises(user.id);
+          } catch (e) {
+            console.error('[starter exercises]', e);
+          }
+        },
+      },
+    },
   },
   // Must stay last: lets auth calls made from server code set cookies.
   plugins: [nextCookies()],

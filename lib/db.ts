@@ -10,6 +10,7 @@ import type {
   Settings,
   TrainingSummary,
 } from './types';
+import starterExercises from './starter-exercises.json';
 
 // DATE stays a plain 'YYYY-MM-DD' string, NUMERIC becomes a JS number,
 // TIMESTAMPTZ becomes an ISO string.
@@ -351,6 +352,22 @@ export async function updateExercise(userId: string, id: number, input: Exercise
     [id, userId, input.name, input.is_bodyweight, input.primary_muscle, input.secondary_muscle]
   );
   return (rows[0] as Exercise) ?? null;
+}
+
+// The list a new account starts with. Names the user already has are left alone.
+export async function addStarterExercises(userId: string): Promise<void> {
+  await pool.query(
+    `INSERT INTO exercises (user_id, name, is_bodyweight, primary_muscle, secondary_muscle)
+     SELECT $1, * FROM unnest($2::text[], $3::boolean[], $4::text[], $5::text[])
+     ON CONFLICT (user_id, lower(name)) DO NOTHING`,
+    [
+      userId,
+      starterExercises.map((e) => e.name),
+      starterExercises.map((e) => e.is_bodyweight),
+      starterExercises.map((e) => e.primary_muscle),
+      starterExercises.map((e) => e.secondary_muscle),
+    ]
+  );
 }
 
 // Exercises with logged sets can't be deleted (the foreign key on sets is the backstop).
