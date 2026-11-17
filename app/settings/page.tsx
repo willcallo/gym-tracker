@@ -1,16 +1,17 @@
 export const dynamic = 'force-dynamic';
 
+import { requireUser } from '@/lib/session';
 import { getSettings } from '@/lib/db';
-import { authEnabled } from '@/lib/auth';
 import { PageHeader } from '../components/ui';
 import SettingsForm from './SettingsForm';
 
 export default async function SettingsPage() {
-  const settings = await getSettings();
+  const user = await requireUser();
+  const settings = await getSettings(user.id);
   return (
     <>
       <PageHeader title="Settings" />
-      <SettingsForm initial={settings} canSignOut={authEnabled()} />
+      <SettingsForm initial={settings} email={user.email} />
     </>
   );
 }

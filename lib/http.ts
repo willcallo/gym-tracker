@@ -22,4 +22,11 @@ export function upstreamError(e: unknown, context: string): Response {
   return Response.json({ error: 'The AI request failed. Try again in a moment.' }, { status: 502 });
 }
 
+export function aiLimitReached(limit: number): Response {
+  return Response.json(
+    { error: `You have used today's ${limit} AI requests. They reset at midnight UTC.` },
+    { status: 429 }
+  );
+}
+
 export const AI_NOT_CONFIGURED = 'AI is not set up. Add ANTHROPIC_API_KEY to enable it.';

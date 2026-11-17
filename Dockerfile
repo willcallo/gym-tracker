@@ -25,6 +25,7 @@ COPY --from=builder /app/next.config.ts ./next.config.ts
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
 COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/lib/schema.sql ./lib/schema.sql
+COPY --from=builder /app/lib/starter-exercises.json ./lib/starter-exercises.json
 
 EXPOSE 3000
 # db:init is idempotent (IF NOT EXISTS), so running it on every start is safe.

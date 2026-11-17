@@ -10,6 +10,7 @@ import type {
   Settings,
   TrainingSummary,
 } from './types';
+import starterExercises from './starter-exercises.json';
 
 // DATE stays a plain 'YYYY-MM-DD' string, NUMERIC becomes a JS number,
 // TIMESTAMPTZ becomes an ISO string.
@@ -19,7 +20,7 @@ types.setTypeParser(1184, (v: string) => new Date(v).toISOString());
 
 // Cached on globalThis so dev hot reloads don't leak pools.
 const g = globalThis as unknown as { __gymPool?: Pool; __gymPoolHandled?: boolean };
-const pool =
+export const pool =
   g.__gymPool ??
   (g.__gymPool = new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -71,12 +72,13 @@ const SESSION_SELECT = `
     ), '[]'::json) AS exercises
   FROM sessions s`;
 
-// For each exercise: the session it was last done in, plus that session's sets.
+// For each exercise: the session it was last done in, plus that session's sets. Expects the
+// user id as $1, so the scan only covers that person's sets.
 const LAST_SETS_JOINS = `
   LEFT JOIN (
     SELECT DISTINCT ON (st.exercise_id) st.exercise_id, st.session_id, s.date AS last_date
     FROM sets st JOIN sessions s ON s.id = st.session_id
-    WHERE st.set_type <> 'warmup'
+    WHERE st.user_id = $1 AND st.set_type <> 'warmup'
     ORDER BY st.exercise_id, s.date DESC, s.id DESC
   ) ls ON ls.exercise_id = e.id
   LEFT JOIN LATERAL (
@@ -94,15 +96,16 @@ export interface SessionCursor {
 }
 
 export async function getSessionsPage(
+  userId: string,
   limit: number,
   before?: SessionCursor
 ): Promise<{ sessions: SessionWithSets[]; nextCursor: SessionCursor | null }> {
   const { rows } = await readQuery(
     `${SESSION_SELECT}
-     WHERE $1::date IS NULL OR (s.date, s.id) < ($1::date, $2::int)
+     WHERE s.user_id = $4 AND ($1::date IS NULL OR (s.date, s.id) < ($1::date, $2::int))
      ORDER BY s.date DESC, s.id DESC
      LIMIT $3`,
-    [before?.date ?? null, before?.id ?? null, limit + 1]
+    [before?.date ?? null, before?.id ?? null, limit + 1, userId]
   );
   const hasMore = rows.length > limit;
   const sessions = (hasMore ? rows.slice(0, limit) : rows) as SessionWithSets[];
@@ -110,8 +113,8 @@ export async function getSessionsPage(
   return { sessions, nextCursor: hasMore && last ? { date: last.date, id: last.id } : null };
 }
 
-export async function getSession(id: number): Promise<SessionWithSets | null> {
-  const { rows } = await readQuery(`${SESSION_SELECT} WHERE s.id = $1`, [id]);
+export async function getSession(userId: string, id: number): Promise<SessionWithSets | null> {
+  const { rows } = await readQuery(`${SESSION_SELECT} WHERE s.id = $1 AND s.user_id = $2`, [id, userId]);
   return (rows[0] as SessionWithSets) ?? null;
 }
 
@@ -141,31 +144,35 @@ const UNNEST_SETS = `unnest($1::int[], $2::int[], $3::int[], $4::int[], $5::nume
   AS u(exercise_id, exercise_position, set_number, reps, weight, rpe, set_type)`;
 
 // One statement: the session row and all of its sets go in together or not at all. With a
-// client_key, a retry of the same save returns the session that already exists.
-export async function createSession(input: SessionInput): Promise<number> {
+// client_key, a retry of the same save returns the session that already exists. An exercise id
+// that isn't this user's fails the foreign key on sets (error 23503) and nothing is saved.
+export async function createSession(userId: string, input: SessionInput): Promise<number> {
   const arrays = flattenSets(input.blocks);
-  const params = [...arrays, input.date, input.label, input.notes, input.duration_seconds, input.client_key];
+  const params = [...arrays, input.date, input.label, input.notes, input.duration_seconds, input.client_key, userId];
   const { rows } = await pool.query(
     `WITH s AS (
-       INSERT INTO sessions (date, label, notes, duration_seconds, client_key)
-       VALUES ($8, $9, $10, $11, $12)
-       ON CONFLICT (client_key) DO NOTHING
+       INSERT INTO sessions (user_id, date, label, notes, duration_seconds, client_key)
+       VALUES ($13::text, $8, $9, $10, $11, $12)
+       ON CONFLICT (user_id, client_key) DO NOTHING
        RETURNING id
      )
-     INSERT INTO sets (session_id, exercise_id, exercise_position, set_number, reps, weight, rpe, set_type)
-     SELECT s.id, u.exercise_id, u.exercise_position, u.set_number, u.reps, u.weight, u.rpe, u.set_type
+     INSERT INTO sets (user_id, session_id, exercise_id, exercise_position, set_number, reps, weight, rpe, set_type)
+     SELECT $13::text, s.id, u.exercise_id, u.exercise_position, u.set_number, u.reps, u.weight, u.rpe, u.set_type
      FROM s, ${UNNEST_SETS}
      RETURNING session_id`,
     params
   );
   if (rows[0]) return rows[0].session_id as number;
-  const existing = await pool.query('SELECT id FROM sessions WHERE client_key = $1', [input.client_key]);
+  const existing = await pool.query('SELECT id FROM sessions WHERE client_key = $1 AND user_id = $2', [
+    input.client_key,
+    userId,
+  ]);
   if (existing.rows[0]) return existing.rows[0].id as number;
   throw new Error('Session insert returned no row');
 }
 
 // Replaces the session's sets. A stored coaching note is kept but flagged as out of date.
-export async function updateSession(id: number, input: SessionInput): Promise<boolean> {
+export async function updateSession(userId: string, id: number, input: SessionInput): Promise<boolean> {
   const arrays = flattenSets(input.blocks);
   const client = await pool.connect();
   try {
@@ -174,20 +181,21 @@ export async function updateSession(id: number, input: SessionInput): Promise<bo
       `UPDATE sessions
        SET date = $2, label = $3, notes = $4, duration_seconds = $5, updated_at = now(),
            coaching_stale = (coaching_note IS NOT NULL)
-       WHERE id = $1`,
-      [id, input.date, input.label, input.notes, input.duration_seconds]
+       WHERE id = $1 AND user_id = $6`,
+      [id, input.date, input.label, input.notes, input.duration_seconds, userId]
     );
     if (upd.rowCount === 0) {
       await client.query('ROLLBACK');
       return false;
     }
-    await client.query('DELETE FROM sets WHERE session_id = $1', [id]);
+    await client.query('DELETE FROM sets WHERE session_id = $1 AND user_id = $2', [id, userId]);
     await client.query(
-      `INSERT INTO sets (session_id, exercise_id, exercise_position, set_number, reps, weight, rpe, set_type)
-       SELECT $8::int, u.exercise_id, u.exercise_position, u.set_number, u.reps, u.weight, u.rpe, u.set_type
+      `INSERT INTO sets (user_id, session_id, exercise_id, exercise_position, set_number, reps, weight, rpe, set_type)
+       SELECT $9::text, $8::int, u.exercise_id, u.exercise_position, u.set_number, u.reps, u.weight, u.rpe, u.set_type
        FROM ${UNNEST_SETS}`,
-      [...arrays, id]
+      [...arrays, id, userId]
     );
+    // The exercise foreign key is deferred, so a bad exercise id is reported here, at commit.
     await client.query('COMMIT');
     return true;
   } catch (e) {
@@ -198,42 +206,49 @@ export async function updateSession(id: number, input: SessionInput): Promise<bo
   }
 }
 
-export async function deleteSession(id: number): Promise<boolean> {
-  const { rowCount } = await pool.query('DELETE FROM sessions WHERE id = $1', [id]);
+export async function deleteSession(userId: string, id: number): Promise<boolean> {
+  const { rowCount } = await pool.query('DELETE FROM sessions WHERE id = $1 AND user_id = $2', [id, userId]);
   return (rowCount ?? 0) > 0;
 }
 
 // `basedOnUpdatedAt` is the session's updated_at when the note was requested. If the session was
 // edited while the AI was thinking, the note is saved but stays flagged as out of date. The value
 // arrives with millisecond precision while the column has microseconds, hence the 1ms margin.
-export async function saveCoachingNote(id: number, note: string, basedOnUpdatedAt: string): Promise<boolean> {
+export async function saveCoachingNote(
+  userId: string,
+  id: number,
+  note: string,
+  basedOnUpdatedAt: string
+): Promise<boolean> {
   const { rowCount } = await pool.query(
     `UPDATE sessions
      SET coaching_note = $2, coaching_at = now(), coaching_stale = (updated_at >= $3::timestamptz + interval '1 millisecond')
-     WHERE id = $1`,
-    [id, note, basedOnUpdatedAt]
+     WHERE id = $1 AND user_id = $4`,
+    [id, note, basedOnUpdatedAt, userId]
   );
   return (rowCount ?? 0) > 0;
 }
 
-export async function getSessionUpdatedAt(id: number): Promise<string | null> {
-  const { rows } = await pool.query('SELECT updated_at FROM sessions WHERE id = $1', [id]);
+export async function getSessionUpdatedAt(userId: string, id: number): Promise<string | null> {
+  const { rows } = await pool.query('SELECT updated_at FROM sessions WHERE id = $1 AND user_id = $2', [id, userId]);
   return (rows[0]?.updated_at as string) ?? null;
 }
 
 // ── Exercises ────────────────────────────────────────────────
 
-export async function getExercisesForLog(): Promise<ExerciseWithLast[]> {
+export async function getExercisesForLog(userId: string): Promise<ExerciseWithLast[]> {
   const { rows } = await readQuery(
     `SELECT e.id, e.name, e.is_bodyweight, e.primary_muscle, e.secondary_muscle,
             COALESCE(l.last_sets, '[]'::json) AS last_sets
      FROM exercises e ${LAST_SETS_JOINS}
-     ORDER BY ls.last_date DESC NULLS LAST, e.name`
+     WHERE e.user_id = $1
+     ORDER BY ls.last_date DESC NULLS LAST, e.name`,
+    [userId]
   );
   return rows as ExerciseWithLast[];
 }
 
-export async function getExerciseOverview(): Promise<{
+export async function getExerciseOverview(userId: string): Promise<{
   exercises: ExerciseOverview[];
   sessionCount: number;
   summary: TrainingSummary | null;
@@ -249,15 +264,18 @@ export async function getExerciseOverview(): Promise<{
          SELECT exercise_id, count(DISTINCT session_id) AS session_count,
                 max(weight) FILTER (WHERE set_type <> 'warmup') AS max_weight,
                 max(reps) FILTER (WHERE set_type <> 'warmup') AS max_reps
-         FROM sets GROUP BY exercise_id
+         FROM sets WHERE user_id = $1 GROUP BY exercise_id
        ) p ON p.exercise_id = e.id
        ${LAST_SETS_JOINS}
-       ORDER BY COALESCE(p.session_count, 0) DESC, ls.last_date DESC NULLS LAST, e.name`
+       WHERE e.user_id = $1
+       ORDER BY COALESCE(p.session_count, 0) DESC, ls.last_date DESC NULLS LAST, e.name`,
+      [userId]
     ),
     readQuery(
-      `SELECT (SELECT count(*) FROM sessions)::int AS session_count,
+      `SELECT (SELECT count(*) FROM sessions WHERE user_id = $1)::int AS session_count,
               t.summary, t.session_count AS summary_session_count, t.generated_at
-       FROM (SELECT 1) x LEFT JOIN training_summary t ON true`
+       FROM (SELECT 1) x LEFT JOIN training_summary t ON t.user_id = $1`,
+      [userId]
     ),
   ]);
   const m = metaRes.rows[0];
@@ -271,6 +289,7 @@ export async function getExerciseOverview(): Promise<{
 }
 
 export async function getExerciseDetail(
+  userId: string,
   id: number
 ): Promise<{ exercise: Exercise; points: ExercisePoint[] } | null> {
   const { rows } = await readQuery(
@@ -293,13 +312,13 @@ export async function getExerciseDetail(
                 json_agg(json_build_object('reps', st.reps, 'weight', st.weight, 'rpe', st.rpe, 'set_type', st.set_type)
                          ORDER BY st.exercise_position, st.set_number) AS sets
          FROM sets st JOIN sessions s ON s.id = st.session_id
-         WHERE st.exercise_id = e.id
+         WHERE st.exercise_id = e.id AND st.user_id = e.user_id
          GROUP BY s.id, s.date, s.label
          HAVING bool_or(st.set_type <> 'warmup')
        ) x
      ) pts ON true
-     WHERE e.id = $1`,
-    [id]
+     WHERE e.id = $1 AND e.user_id = $2`,
+    [id, userId]
   );
   const row = rows[0];
   if (!row) return null;
@@ -315,35 +334,51 @@ export async function getExerciseDetail(
   return { exercise: exercise as Exercise, points };
 }
 
-export async function createExercise(input: ExerciseInput): Promise<Exercise> {
+export async function createExercise(userId: string, input: ExerciseInput): Promise<Exercise> {
   const { rows } = await pool.query(
-    `INSERT INTO exercises (name, is_bodyweight, primary_muscle, secondary_muscle)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO exercises (user_id, name, is_bodyweight, primary_muscle, secondary_muscle)
+     VALUES ($1, $2, $3, $4, $5)
      RETURNING id, name, is_bodyweight, primary_muscle, secondary_muscle`,
-    [input.name, input.is_bodyweight, input.primary_muscle, input.secondary_muscle]
+    [userId, input.name, input.is_bodyweight, input.primary_muscle, input.secondary_muscle]
   );
   return rows[0] as Exercise;
 }
 
-export async function updateExercise(id: number, input: ExerciseInput): Promise<Exercise | null> {
+export async function updateExercise(userId: string, id: number, input: ExerciseInput): Promise<Exercise | null> {
   const { rows } = await pool.query(
-    `UPDATE exercises SET name = $2, is_bodyweight = $3, primary_muscle = $4, secondary_muscle = $5
-     WHERE id = $1
+    `UPDATE exercises SET name = $3, is_bodyweight = $4, primary_muscle = $5, secondary_muscle = $6
+     WHERE id = $1 AND user_id = $2
      RETURNING id, name, is_bodyweight, primary_muscle, secondary_muscle`,
-    [id, input.name, input.is_bodyweight, input.primary_muscle, input.secondary_muscle]
+    [id, userId, input.name, input.is_bodyweight, input.primary_muscle, input.secondary_muscle]
   );
   return (rows[0] as Exercise) ?? null;
 }
 
-// Exercises with logged sets can't be deleted (the FK is RESTRICT as a backstop).
-export async function deleteExercise(id: number): Promise<'deleted' | 'has_sets' | 'not_found'> {
+// The list a new account starts with. Names the user already has are left alone.
+export async function addStarterExercises(userId: string): Promise<void> {
+  await pool.query(
+    `INSERT INTO exercises (user_id, name, is_bodyweight, primary_muscle, secondary_muscle)
+     SELECT $1, * FROM unnest($2::text[], $3::boolean[], $4::text[], $5::text[])
+     ON CONFLICT (user_id, lower(name)) DO NOTHING`,
+    [
+      userId,
+      starterExercises.map((e) => e.name),
+      starterExercises.map((e) => e.is_bodyweight),
+      starterExercises.map((e) => e.primary_muscle),
+      starterExercises.map((e) => e.secondary_muscle),
+    ]
+  );
+}
+
+// Exercises with logged sets can't be deleted (the foreign key on sets is the backstop).
+export async function deleteExercise(userId: string, id: number): Promise<'deleted' | 'has_sets' | 'not_found'> {
   const del = await pool.query(
     `DELETE FROM exercises e
-     WHERE e.id = $1 AND NOT EXISTS (SELECT 1 FROM sets WHERE exercise_id = e.id)`,
-    [id]
+     WHERE e.id = $1 AND e.user_id = $2 AND NOT EXISTS (SELECT 1 FROM sets WHERE exercise_id = e.id)`,
+    [id, userId]
   );
   if ((del.rowCount ?? 0) > 0) return 'deleted';
-  const { rows } = await pool.query('SELECT 1 FROM exercises WHERE id = $1', [id]);
+  const { rows } = await pool.query('SELECT 1 FROM exercises WHERE id = $1 AND user_id = $2', [id, userId]);
   return rows.length ? 'has_sets' : 'not_found';
 }
 
@@ -351,21 +386,23 @@ export async function deleteExercise(id: number): Promise<'deleted' | 'has_sets'
 
 const DEFAULT_SETTINGS: Settings = { rest_timer_enabled: true, rest_seconds: 90 };
 
-export async function getSettings(): Promise<Settings> {
-  const { rows } = await readQuery('SELECT rest_timer_enabled, rest_seconds FROM settings');
+export async function getSettings(userId: string): Promise<Settings> {
+  const { rows } = await readQuery('SELECT rest_timer_enabled, rest_seconds FROM settings WHERE user_id = $1', [
+    userId,
+  ]);
   return (rows[0] as Settings) ?? DEFAULT_SETTINGS;
 }
 
-export async function saveSettings(patch: Partial<Settings>): Promise<Settings> {
+export async function saveSettings(userId: string, patch: Partial<Settings>): Promise<Settings> {
   const { rows } = await pool.query(
-    `INSERT INTO settings (id, rest_timer_enabled, rest_seconds)
-     VALUES (true, COALESCE($1, true), COALESCE($2, 90))
-     ON CONFLICT (id) DO UPDATE SET
-       rest_timer_enabled = COALESCE($1, settings.rest_timer_enabled),
-       rest_seconds = COALESCE($2, settings.rest_seconds),
+    `INSERT INTO settings (user_id, rest_timer_enabled, rest_seconds)
+     VALUES ($1, COALESCE($2, true), COALESCE($3, 90))
+     ON CONFLICT (user_id) DO UPDATE SET
+       rest_timer_enabled = COALESCE($2, settings.rest_timer_enabled),
+       rest_seconds = COALESCE($3, settings.rest_seconds),
        updated_at = now()
      RETURNING rest_timer_enabled, rest_seconds`,
-    [patch.rest_timer_enabled ?? null, patch.rest_seconds ?? null]
+    [userId, patch.rest_timer_enabled ?? null, patch.rest_seconds ?? null]
   );
   return rows[0] as Settings;
 }
@@ -377,15 +414,16 @@ export interface CoachingContext {
   recentHistory: { date: string; label: string | null; muscle_counts: Record<string, number> }[];
 }
 
-// Only sessions before this one count, so coaching an old session isn't skewed by later work.
-export async function getCoachingContext(session: {
-  id: number;
-  date: string;
-}): Promise<CoachingContext> {
+// Only this user's sessions before this one count, so coaching an old session isn't skewed by
+// later work. Everything else in the query hangs off the `prior` CTE.
+export async function getCoachingContext(
+  userId: string,
+  session: { id: number; date: string }
+): Promise<CoachingContext> {
   const { rows } = await readQuery(
     `WITH prior AS (
        SELECT s.id, s.date, s.label FROM sessions s
-       WHERE (s.date, s.id) < ($1::date, $2::int)
+       WHERE s.user_id = $3 AND (s.date, s.id) < ($1::date, $2::int)
      )
      SELECT
        COALESCE((
@@ -412,7 +450,7 @@ export async function getCoachingContext(session: {
                 ) ORDER BY r.date DESC, r.id DESC)
          FROM (SELECT * FROM prior ORDER BY date DESC, id DESC LIMIT 5) r
        ), '[]'::json) AS recent`,
-    [session.date, session.id]
+    [session.date, session.id, userId]
   );
   return {
     priorBest: rows[0].prior_best,
@@ -430,11 +468,11 @@ export interface SummaryContext {
   prs: { name: string; is_bodyweight: boolean; best: number }[];
 }
 
-export async function getSummaryContext(): Promise<SummaryContext> {
+export async function getSummaryContext(userId: string): Promise<SummaryContext> {
   const { rows } = await readQuery(
-    `WITH recent AS (SELECT id FROM sessions ORDER BY date DESC, id DESC LIMIT 10)
+    `WITH recent AS (SELECT id FROM sessions WHERE user_id = $1 ORDER BY date DESC, id DESC LIMIT 10)
      SELECT
-       (SELECT count(*) FROM sessions)::int AS session_count,
+       (SELECT count(*) FROM sessions WHERE user_id = $1)::int AS session_count,
        (SELECT count(*) FROM recent)::int AS recent_sessions,
        COALESCE((
          SELECT json_agg(json_build_object('muscle', m.muscle, 'sets', m.sets) ORDER BY m.sets DESC)
@@ -452,15 +490,17 @@ export async function getSummaryContext(): Promise<SummaryContext> {
            SELECT e.name, e.is_bodyweight, count(DISTINCT st.session_id) AS n,
                   CASE WHEN e.is_bodyweight THEN max(st.reps) ELSE max(st.weight) END AS best
            FROM sets st JOIN exercises e ON e.id = st.exercise_id
-           WHERE st.set_type <> 'warmup'
+           WHERE st.user_id = $1 AND st.set_type <> 'warmup'
            GROUP BY e.id ORDER BY n DESC, e.name LIMIT 10
          ) p
-       ), '[]'::json) AS prs`
+       ), '[]'::json) AS prs`,
+    [userId]
   );
   const r = rows[0];
   const range = await pool.query(
     `SELECT min(date) AS from_date, max(date) AS to_date
-     FROM (SELECT date FROM sessions ORDER BY date DESC, id DESC LIMIT 10) r`
+     FROM (SELECT date FROM sessions WHERE user_id = $1 ORDER BY date DESC, id DESC LIMIT 10) r`,
+    [userId]
   );
   return {
     sessionCount: r.session_count,
@@ -472,11 +512,26 @@ export async function getSummaryContext(): Promise<SummaryContext> {
   };
 }
 
-export async function saveTrainingSummary(summary: string, sessionCount: number): Promise<void> {
+export async function saveTrainingSummary(userId: string, summary: string, sessionCount: number): Promise<void> {
   await pool.query(
-    `INSERT INTO training_summary (id, summary, session_count) VALUES (true, $1, $2)
-     ON CONFLICT (id) DO UPDATE SET
+    `INSERT INTO training_summary (user_id, summary, session_count) VALUES ($1, $2, $3)
+     ON CONFLICT (user_id) DO UPDATE SET
        summary = EXCLUDED.summary, session_count = EXCLUDED.session_count, generated_at = now()`,
-    [summary, sessionCount]
+    [userId, summary, sessionCount]
   );
+}
+
+// ── AI daily cap ─────────────────────────────────────────────
+
+// Counts one AI request against today's allowance (days are UTC). Returns false, without counting,
+// once the limit is reached. One statement, so parallel requests can't slip past the limit.
+export async function countAiRequest(userId: string, dailyLimit: number): Promise<boolean> {
+  const { rows } = await pool.query(
+    `INSERT INTO ai_usage (user_id, day, count) VALUES ($1, current_date, 1)
+     ON CONFLICT (user_id, day) DO UPDATE SET count = ai_usage.count + 1
+       WHERE ai_usage.count < $2
+     RETURNING count`,
+    [userId, dailyLimit]
+  );
+  return rows.length > 0;
 }

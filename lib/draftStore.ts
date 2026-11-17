@@ -5,6 +5,20 @@ import { useSyncExternalStore } from 'react';
 export const NEW_DRAFT_KEY = 'gym:draft:new';
 export const editDraftKey = (id: number) => `gym:draft:edit:${id}`;
 
+// Drafts live in this browser's local storage, which is shared by everyone who signs in on the
+// device. Each stored key therefore carries the owner's user id, so one person is never offered
+// another's unsaved session. The owner is set by <DraftOwner> in the root layout before any
+// draft is read.
+let owner = '';
+
+export function setDraftOwner(userId: string) {
+  owner = userId;
+}
+
+function storageKey(key: string): string {
+  return owner ? `${key}:u:${owner}` : key;
+}
+
 const listeners = new Set<() => void>();
 
 function notify() {
@@ -13,7 +27,7 @@ function notify() {
 
 export function readDraft(key: string): string | null {
   try {
-    return localStorage.getItem(key);
+    return localStorage.getItem(storageKey(key));
   } catch {
     return null;
   }
@@ -21,16 +35,31 @@ export function readDraft(key: string): string | null {
 
 export function writeDraft(key: string, value: string) {
   try {
-    localStorage.setItem(key, value);
+    localStorage.setItem(storageKey(key), value);
   } catch {
     // storage full or blocked: autosave just stops working
   }
   notify();
 }
 
-export function clearDraft(key: string) {
+// `quiet` skips listener updates, for use during render.
+export function clearDraft(key: string, quiet = false) {
   try {
-    localStorage.removeItem(key);
+    localStorage.removeItem(storageKey(key));
+  } catch {
+    // ignore
+  }
+  if (!quiet) notify();
+}
+
+// On sign-out: remove everything this app keeps in the browser (every account's drafts and the
+// rest timer), so nothing is left behind on a shared device.
+export function clearLocalData() {
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k?.startsWith('gym:')) localStorage.removeItem(k);
+    }
   } catch {
     // ignore
   }
@@ -68,12 +97,7 @@ export function isStaleBlankDraft(raw: string, now = Date.now()): boolean {
 export function pruneStaleNewDraft(quiet = false) {
   const raw = readDraft(NEW_DRAFT_KEY);
   if (raw === null || !isStaleBlankDraft(raw)) return;
-  try {
-    localStorage.removeItem(NEW_DRAFT_KEY);
-  } catch {
-    // ignore
-  }
-  if (!quiet) notify();
+  clearDraft(NEW_DRAFT_KEY, quiet);
 }
 
 function draftIsLive(key: string, raw: string | null): boolean {

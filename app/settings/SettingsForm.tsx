@@ -5,16 +5,13 @@ import { btn, Card, SectionTitle } from '../components/ui';
 import Toggle from '../components/Toggle';
 import { formatClock } from '@/lib/format';
 import type { Settings } from '@/lib/types';
+import { authClient } from '@/lib/auth-client';
+import { clearLocalData } from '@/lib/draftStore';
+import ChangePassword from './ChangePassword';
 
 const PRESETS = [60, 90, 120, 180];
 
-export default function SettingsForm({
-  initial,
-  canSignOut,
-}: {
-  initial: Settings;
-  canSignOut: boolean;
-}) {
+export default function SettingsForm({ initial, email }: { initial: Settings; email: string }) {
   const [settings, setSettings] = useState(initial);
   const [error, setError] = useState('');
 
@@ -41,7 +38,8 @@ export default function SettingsForm({
   }
 
   async function signOut() {
-    await fetch('/api/logout', { method: 'POST' });
+    await authClient.signOut().catch(() => {});
+    clearLocalData();
     window.location.assign('/login');
   }
 
@@ -107,14 +105,22 @@ export default function SettingsForm({
         </Card>
       </section>
 
-      {canSignOut && (
-        <section>
-          <SectionTitle>Account</SectionTitle>
-          <button type="button" onClick={signOut} className={`${btn('secondary')} w-full`}>
-            Sign out
-          </button>
-        </section>
-      )}
+      <section>
+        <SectionTitle>Account</SectionTitle>
+        <Card className="mb-3 space-y-4">
+          <div>
+            <p className="text-sm text-gray-600">Signed in as</p>
+            <p className="break-all text-base font-semibold">{email}</p>
+          </div>
+          <ChangePassword />
+        </Card>
+        <button type="button" onClick={signOut} className={`${btn('secondary')} w-full`}>
+          Sign out
+        </button>
+        <p className="mt-2 text-sm text-gray-600">
+          Signing out also removes any unsaved session draft from this device.
+        </p>
+      </section>
     </div>
   );
 }

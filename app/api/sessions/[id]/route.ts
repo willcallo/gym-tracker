@@ -1,3 +1,4 @@
+import { getUser, unauthorised } from '@/lib/session';
 import { deleteSession, updateSession } from '@/lib/db';
 import { badRequest, isPgError, parseId, serverError } from '@/lib/http';
 import { parseSessionInput } from '@/lib/validate';
@@ -6,11 +7,13 @@ type Ctx = { params: Promise<{ id: string }> };
 
 export async function PUT(request: Request, { params }: Ctx) {
   try {
+    const user = await getUser();
+    if (!user) return unauthorised();
     const id = parseId((await params).id);
     if (id === null) return badRequest('Invalid session id');
     const parsed = parseSessionInput(await request.json().catch(() => null));
     if (!parsed.ok) return badRequest(parsed.error);
-    const found = await updateSession(id, parsed.value);
+    const found = await updateSession(user.id, id, parsed.value);
     if (!found) return Response.json({ error: 'Session not found' }, { status: 404 });
     return Response.json({ id });
   } catch (e) {
@@ -21,9 +24,11 @@ export async function PUT(request: Request, { params }: Ctx) {
 
 export async function DELETE(_request: Request, { params }: Ctx) {
   try {
+    const user = await getUser();
+    if (!user) return unauthorised();
     const id = parseId((await params).id);
     if (id === null) return badRequest('Invalid session id');
-    const found = await deleteSession(id);
+    const found = await deleteSession(user.id, id);
     if (!found) return Response.json({ error: 'Session not found' }, { status: 404 });
     return Response.json({ ok: true });
   } catch (e) {

@@ -28,7 +28,7 @@ export default async function LoginPage({
         </svg>
       </div>
       <h1 className="mb-1 text-3xl font-bold tracking-tight">Gym Tracker</h1>
-      <p className="mb-8 text-base text-gray-700">Enter the password to continue.</p>
+      <p className="mb-8 text-base text-gray-700">Sign in to continue.</p>
       <LoginForm next={safeNext(next)} />
     </div>
   );

@@ -9,6 +9,13 @@ export function aiEnabled(): boolean {
   return !!process.env.ANTHROPIC_API_KEY;
 }
 
+// AI requests each person may make per day. The API key is shared, so this caps what one account
+// (or a leaked invite code) can spend. Override with AI_DAILY_LIMIT.
+export function aiDailyLimit(): number {
+  const n = Number(process.env.AI_DAILY_LIMIT);
+  return Number.isInteger(n) && n >= 0 ? n : 20;
+}
+
 let client: Anthropic | null = null;
 
 export async function generateText(prompt: string): Promise<string> {
