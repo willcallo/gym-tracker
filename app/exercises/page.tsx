@@ -59,8 +59,8 @@ function ExerciseCard({ e }: { e: ExerciseOverview }) {
 }
 
 export default async function ExercisesPage() {
-  await requireUser();
-  const { exercises, summary, sessionCount } = await getExerciseOverview();
+  const user = await requireUser();
+  const { exercises, summary, sessionCount } = await getExerciseOverview(user.id);
   const done = exercises.filter((e) => e.session_count > 0);
   const untouched = exercises.filter((e) => e.session_count === 0);
 

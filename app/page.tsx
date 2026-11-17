@@ -9,8 +9,8 @@ import HomeStatus from './components/HomeStatus';
 import { EmptyState, SectionTitle } from './components/ui';
 
 export default async function HomePage() {
-  await requireUser();
-  const { sessions, nextCursor } = await getSessionsPage(8);
+  const user = await requireUser();
+  const { sessions, nextCursor } = await getSessionsPage(user.id, 8);
   const recent = sessions.slice(0, 5);
 
   return (

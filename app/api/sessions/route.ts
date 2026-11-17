@@ -6,7 +6,8 @@ import { isValidDate, parseSessionInput } from '@/lib/validate';
 // Cursor-paginated list for History's infinite scroll.
 export async function GET(request: Request) {
   try {
-    if (!(await getUser())) return unauthorised();
+    const user = await getUser();
+    if (!user) return unauthorised();
     const params = new URL(request.url).searchParams;
     const beforeDate = params.get('beforeDate');
     const beforeId = parseId(params.get('beforeId') ?? '');
@@ -17,7 +18,7 @@ export async function GET(request: Request) {
       if (!isValidDate(beforeDate) || beforeId === null) return badRequest('Invalid cursor');
       before = { date: beforeDate, id: beforeId };
     }
-    return Response.json(await getSessionsPage(limit, before));
+    return Response.json(await getSessionsPage(user.id, limit, before));
   } catch (e) {
     return serverError(e, 'GET /api/sessions');
   }
@@ -25,10 +26,11 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    if (!(await getUser())) return unauthorised();
+    const user = await getUser();
+    if (!user) return unauthorised();
     const parsed = parseSessionInput(await request.json().catch(() => null));
     if (!parsed.ok) return badRequest(parsed.error);
-    const id = await createSession(parsed.value);
+    const id = await createSession(user.id, parsed.value);
     return Response.json({ id }, { status: 201 });
   } catch (e) {
     if (isPgError(e, '23503')) return badRequest('One of the exercises no longer exists');

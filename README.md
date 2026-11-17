@@ -12,6 +12,7 @@ A mobile-first workout tracker for one person. Log sessions at the gym, watch yo
 | `INVITE_CODE` | yes | The code a new person must enter to create an account. With it unset nobody can sign up. Change it to stop further sign-ups with the old code; existing accounts are unaffected. |
 | `BETTER_AUTH_URL` | locally | The app's own address, `http://localhost:3000` for local work, your production URL on Vercel. Vercel preview URLs are allowed automatically. `AUTH_ALLOWED_HOSTS` (comma-separated `host:port`) adds more, such as your computer's LAN address for `npm run dev:lan`. |
 | `ANTHROPIC_API_KEY` | no | Enables the AI buttons. Without it they are disabled with a short explanation. |
+| `AI_DAILY_LIMIT` | no | AI requests each account may make per day (default 20, resets at midnight UTC). The API key is shared by everyone, so this caps what one account can spend. |
 
 For local work put them in `.env.local`.
 

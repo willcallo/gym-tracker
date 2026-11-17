@@ -7,7 +7,7 @@ import SessionForm from '../components/SessionForm/SessionForm';
 
 export default async function LogPage() {
   const user = await requireUser();
-  const [exercises, settings] = await Promise.all([getExercisesForLog(), getSettings(user.id)]);
+  const [exercises, settings] = await Promise.all([getExercisesForLog(user.id), getSettings(user.id)]);
   return (
     <>
       <PageHeader title="New session" />

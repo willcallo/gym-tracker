@@ -12,10 +12,10 @@ import CoachingPanel from './CoachingPanel';
 import { aiEnabled } from '@/lib/ai';
 
 export default async function SessionPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireUser();
+  const user = await requireUser();
   const id = parseId((await params).id);
   if (id === null) notFound();
-  const session = await getSession(id);
+  const session = await getSession(user.id, id);
   if (!session) notFound();
 
   return (

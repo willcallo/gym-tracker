@@ -6,8 +6,8 @@ import { PageHeader } from '../components/ui';
 import HistoryList from './HistoryList';
 
 export default async function HistoryPage() {
-  await requireUser();
-  const { sessions, nextCursor } = await getSessionsPage(20);
+  const user = await requireUser();
+  const { sessions, nextCursor } = await getSessionsPage(user.id, 20);
   return (
     <>
       <PageHeader title="History" />
