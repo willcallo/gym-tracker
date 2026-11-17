@@ -6,8 +6,8 @@ import { PageHeader } from '../components/ui';
 import SettingsForm from './SettingsForm';
 
 export default async function SettingsPage() {
-  await requireUser();
-  const settings = await getSettings();
+  const user = await requireUser();
+  const settings = await getSettings(user.id);
   return (
     <>
       <PageHeader title="Settings" />

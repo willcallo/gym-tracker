@@ -11,10 +11,10 @@ import ProgressChart from './ProgressChart';
 import ExerciseEditor from './ExerciseEditor';
 
 export default async function ExerciseDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireUser();
+  const user = await requireUser();
   const id = parseId((await params).id);
   if (id === null) notFound();
-  const detail = await getExerciseDetail(id);
+  const detail = await getExerciseDetail(user.id, id);
   if (!detail) notFound();
   const { exercise, points } = detail;
 

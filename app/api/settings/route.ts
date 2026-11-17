@@ -5,11 +5,12 @@ import { parseSettingsInput } from '@/lib/validate';
 
 export async function PUT(request: Request) {
   try {
-    if (!(await getUser())) return unauthorised();
+    const user = await getUser();
+    if (!user) return unauthorised();
     const body = await request.json().catch(() => null);
     const parsed = parseSettingsInput(body);
     if (!parsed.ok) return badRequest(parsed.error);
-    return Response.json(await saveSettings(parsed.value));
+    return Response.json(await saveSettings(user.id, parsed.value));
   } catch (e) {
     return serverError(e, 'PUT /api/settings');
   }

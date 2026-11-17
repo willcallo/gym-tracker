@@ -271,6 +271,7 @@ export async function getExerciseOverview(): Promise<{
 }
 
 export async function getExerciseDetail(
+  userId: string,
   id: number
 ): Promise<{ exercise: Exercise; points: ExercisePoint[] } | null> {
   const { rows } = await readQuery(
@@ -293,13 +294,13 @@ export async function getExerciseDetail(
                 json_agg(json_build_object('reps', st.reps, 'weight', st.weight, 'rpe', st.rpe, 'set_type', st.set_type)
                          ORDER BY st.exercise_position, st.set_number) AS sets
          FROM sets st JOIN sessions s ON s.id = st.session_id
-         WHERE st.exercise_id = e.id
+         WHERE st.exercise_id = e.id AND st.user_id = e.user_id
          GROUP BY s.id, s.date, s.label
          HAVING bool_or(st.set_type <> 'warmup')
        ) x
      ) pts ON true
-     WHERE e.id = $1`,
-    [id]
+     WHERE e.id = $1 AND e.user_id = $2`,
+    [id, userId]
   );
   const row = rows[0];
   if (!row) return null;
@@ -315,35 +316,35 @@ export async function getExerciseDetail(
   return { exercise: exercise as Exercise, points };
 }
 
-export async function createExercise(input: ExerciseInput): Promise<Exercise> {
+export async function createExercise(userId: string, input: ExerciseInput): Promise<Exercise> {
   const { rows } = await pool.query(
-    `INSERT INTO exercises (name, is_bodyweight, primary_muscle, secondary_muscle)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO exercises (user_id, name, is_bodyweight, primary_muscle, secondary_muscle)
+     VALUES ($1, $2, $3, $4, $5)
      RETURNING id, name, is_bodyweight, primary_muscle, secondary_muscle`,
-    [input.name, input.is_bodyweight, input.primary_muscle, input.secondary_muscle]
+    [userId, input.name, input.is_bodyweight, input.primary_muscle, input.secondary_muscle]
   );
   return rows[0] as Exercise;
 }
 
-export async function updateExercise(id: number, input: ExerciseInput): Promise<Exercise | null> {
+export async function updateExercise(userId: string, id: number, input: ExerciseInput): Promise<Exercise | null> {
   const { rows } = await pool.query(
-    `UPDATE exercises SET name = $2, is_bodyweight = $3, primary_muscle = $4, secondary_muscle = $5
-     WHERE id = $1
+    `UPDATE exercises SET name = $3, is_bodyweight = $4, primary_muscle = $5, secondary_muscle = $6
+     WHERE id = $1 AND user_id = $2
      RETURNING id, name, is_bodyweight, primary_muscle, secondary_muscle`,
-    [id, input.name, input.is_bodyweight, input.primary_muscle, input.secondary_muscle]
+    [id, userId, input.name, input.is_bodyweight, input.primary_muscle, input.secondary_muscle]
   );
   return (rows[0] as Exercise) ?? null;
 }
 
-// Exercises with logged sets can't be deleted (the FK is RESTRICT as a backstop).
-export async function deleteExercise(id: number): Promise<'deleted' | 'has_sets' | 'not_found'> {
+// Exercises with logged sets can't be deleted (the foreign key on sets is the backstop).
+export async function deleteExercise(userId: string, id: number): Promise<'deleted' | 'has_sets' | 'not_found'> {
   const del = await pool.query(
     `DELETE FROM exercises e
-     WHERE e.id = $1 AND NOT EXISTS (SELECT 1 FROM sets WHERE exercise_id = e.id)`,
-    [id]
+     WHERE e.id = $1 AND e.user_id = $2 AND NOT EXISTS (SELECT 1 FROM sets WHERE exercise_id = e.id)`,
+    [id, userId]
   );
   if ((del.rowCount ?? 0) > 0) return 'deleted';
-  const { rows } = await pool.query('SELECT 1 FROM exercises WHERE id = $1', [id]);
+  const { rows } = await pool.query('SELECT 1 FROM exercises WHERE id = $1 AND user_id = $2', [id, userId]);
   return rows.length ? 'has_sets' : 'not_found';
 }
 
@@ -351,21 +352,23 @@ export async function deleteExercise(id: number): Promise<'deleted' | 'has_sets'
 
 const DEFAULT_SETTINGS: Settings = { rest_timer_enabled: true, rest_seconds: 90 };
 
-export async function getSettings(): Promise<Settings> {
-  const { rows } = await readQuery('SELECT rest_timer_enabled, rest_seconds FROM settings');
+export async function getSettings(userId: string): Promise<Settings> {
+  const { rows } = await readQuery('SELECT rest_timer_enabled, rest_seconds FROM settings WHERE user_id = $1', [
+    userId,
+  ]);
   return (rows[0] as Settings) ?? DEFAULT_SETTINGS;
 }
 
-export async function saveSettings(patch: Partial<Settings>): Promise<Settings> {
+export async function saveSettings(userId: string, patch: Partial<Settings>): Promise<Settings> {
   const { rows } = await pool.query(
-    `INSERT INTO settings (id, rest_timer_enabled, rest_seconds)
-     VALUES (true, COALESCE($1, true), COALESCE($2, 90))
-     ON CONFLICT (id) DO UPDATE SET
-       rest_timer_enabled = COALESCE($1, settings.rest_timer_enabled),
-       rest_seconds = COALESCE($2, settings.rest_seconds),
+    `INSERT INTO settings (user_id, rest_timer_enabled, rest_seconds)
+     VALUES ($1, COALESCE($2, true), COALESCE($3, 90))
+     ON CONFLICT (user_id) DO UPDATE SET
+       rest_timer_enabled = COALESCE($2, settings.rest_timer_enabled),
+       rest_seconds = COALESCE($3, settings.rest_seconds),
        updated_at = now()
      RETURNING rest_timer_enabled, rest_seconds`,
-    [patch.rest_timer_enabled ?? null, patch.rest_seconds ?? null]
+    [userId, patch.rest_timer_enabled ?? null, patch.rest_seconds ?? null]
   );
   return rows[0] as Settings;
 }

@@ -66,8 +66,12 @@ CREATE TABLE IF NOT EXISTS "rateLimit" (
   "lastRequest" BIGINT NOT NULL
 );
 
+-- App data. Every row belongs to one account: user_id on each table, removed with the account.
+-- lib/db.ts filters every query by user_id; the keys below are the backstop.
+
 CREATE TABLE IF NOT EXISTS exercises (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES "user" ("id") ON DELETE CASCADE,
   name TEXT NOT NULL CHECK (length(btrim(name)) BETWEEN 1 AND 80),
   is_bodyweight BOOLEAN NOT NULL DEFAULT false,
   primary_muscle TEXT NOT NULL CHECK (primary_muscle IN (
@@ -79,61 +83,74 @@ CREATE TABLE IF NOT EXISTS exercises (
     'quads','hamstrings','glutes','calves','core','cardio'
   )),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CHECK (secondary_muscle IS NULL OR secondary_muscle <> primary_muscle)
+  CHECK (secondary_muscle IS NULL OR secondary_muscle <> primary_muscle),
+  -- Target of the composite foreign key on sets.
+  UNIQUE (id, user_id)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS exercises_name_lower_idx ON exercises (lower(name));
+-- Names are unique per person, not across the whole app.
+CREATE UNIQUE INDEX IF NOT EXISTS exercises_user_name_lower_idx ON exercises (user_id, lower(name));
 
 CREATE TABLE IF NOT EXISTS sessions (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES "user" ("id") ON DELETE CASCADE,
   date DATE NOT NULL,
   label TEXT CHECK (label IS NULL OR length(label) <= 60),
   notes TEXT CHECK (notes IS NULL OR length(notes) <= 2000),
+  duration_seconds INTEGER CHECK (duration_seconds IS NULL OR duration_seconds BETWEEN 1 AND 43200),
+  -- Lets the app retry a save after a dropped connection without creating a duplicate session.
+  client_key TEXT,
   coaching_note TEXT,
   coaching_at TIMESTAMPTZ,
   coaching_stale BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (id, user_id)
 );
-CREATE INDEX IF NOT EXISTS sessions_date_idx ON sessions (date DESC, id DESC);
+CREATE INDEX IF NOT EXISTS sessions_user_date_idx ON sessions (user_id, date DESC, id DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS sessions_user_client_key_idx ON sessions (user_id, client_key);
 
+-- user_id is repeated here so both foreign keys can include it: a set can only join a session and
+-- an exercise that belong to the same person. The exercise key has no ON DELETE action, so an
+-- exercise with logged sets can't be removed on its own. It is deferred to the end of the
+-- transaction because deleting an account removes exercises and sessions (and through them, sets)
+-- in no fixed order; checked any earlier, that fails whenever the exercises go first.
 CREATE TABLE IF NOT EXISTS sets (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-  exercise_id INTEGER NOT NULL REFERENCES exercises(id) ON DELETE RESTRICT,
+  user_id TEXT NOT NULL,
+  session_id INTEGER NOT NULL,
+  exercise_id INTEGER NOT NULL,
   exercise_position SMALLINT NOT NULL CHECK (exercise_position >= 0),
   set_number SMALLINT NOT NULL CHECK (set_number >= 1),
   reps INTEGER NOT NULL CHECK (reps BETWEEN 1 AND 1000),
   weight NUMERIC(6,2) CHECK (weight IS NULL OR weight >= 0),
   rpe NUMERIC(3,1) CHECK (rpe IS NULL OR (rpe >= 1 AND rpe <= 10)),
-  UNIQUE (session_id, exercise_position, set_number)
+  -- 'dropset' is one word because the additive-schema check bans the word on its own.
+  set_type TEXT NOT NULL DEFAULT 'normal' CHECK (set_type IN ('normal','warmup','dropset','failure')),
+  UNIQUE (session_id, exercise_position, set_number),
+  FOREIGN KEY (session_id, user_id) REFERENCES sessions (id, user_id) ON DELETE CASCADE,
+  FOREIGN KEY (exercise_id, user_id) REFERENCES exercises (id, user_id) DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX IF NOT EXISTS sets_exercise_idx ON sets (exercise_id, session_id);
 
+-- One row per person, created the first time they change a setting.
 CREATE TABLE IF NOT EXISTS settings (
-  id BOOLEAN PRIMARY KEY DEFAULT true CHECK (id),
+  user_id TEXT PRIMARY KEY REFERENCES "user" ("id") ON DELETE CASCADE,
   rest_timer_enabled BOOLEAN NOT NULL DEFAULT true,
   rest_seconds INTEGER NOT NULL DEFAULT 90 CHECK (rest_seconds BETWEEN 15 AND 600),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-INSERT INTO settings (id) VALUES (true) ON CONFLICT DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS training_summary (
-  id BOOLEAN PRIMARY KEY DEFAULT true CHECK (id),
+  user_id TEXT PRIMARY KEY REFERENCES "user" ("id") ON DELETE CASCADE,
   summary TEXT NOT NULL,
   session_count INTEGER NOT NULL,
   generated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Added after the first release. Idempotent, so it is safe on existing databases too.
-ALTER TABLE sessions
-  ADD COLUMN IF NOT EXISTS duration_seconds INTEGER
-  CHECK (duration_seconds IS NULL OR duration_seconds BETWEEN 1 AND 43200);
-
--- Lets the app retry a save after a dropped connection without creating a duplicate session.
-ALTER TABLE sessions ADD COLUMN IF NOT EXISTS client_key TEXT;
-CREATE UNIQUE INDEX IF NOT EXISTS sessions_client_key_idx ON sessions (client_key);
-
--- Warm-up, drop-set and to-failure sets (stored as 'dropset': the additive-schema check bans the word drop). Existing and old-code rows stay 'normal' through the default.
-ALTER TABLE sets
-  ADD COLUMN IF NOT EXISTS set_type TEXT NOT NULL DEFAULT 'normal'
-  CHECK (set_type IN ('normal','warmup','dropset','failure'));
+-- AI requests per person per day, for the daily cap.
+CREATE TABLE IF NOT EXISTS ai_usage (
+  user_id TEXT NOT NULL REFERENCES "user" ("id") ON DELETE CASCADE,
+  day DATE NOT NULL,
+  count INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (user_id, day)
+);
