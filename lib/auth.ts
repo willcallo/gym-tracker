@@ -38,6 +38,9 @@ export const auth = betterAuth({
     enabled: true,
     minPasswordLength: 10,
   },
+  // Lets a signed-in user delete their own account by confirming their password. Every table
+  // hangs off the user row with ON DELETE CASCADE, so all of their data goes with it.
+  user: { deleteUser: { enabled: true } },
   session: {
     expiresIn: 60 * 60 * 24 * 90,
     updateAge: 60 * 60 * 24,
