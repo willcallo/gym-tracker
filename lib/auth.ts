@@ -15,11 +15,27 @@ function inviteCodeMatches(input: unknown): boolean {
   return timingSafeEqual(sha256(input.trim()), sha256(expected));
 }
 
+// BETTER_AUTH_URL as a full URL, or undefined. People reasonably enter just the domain
+// ("gym.example.com") or leave a trailing slash, and a bad value here must not break the build,
+// so a missing scheme is filled in and anything unparseable is ignored with a warning.
+function ownUrl(): string | undefined {
+  const raw = process.env.BETTER_AUTH_URL?.trim();
+  if (!raw) return undefined;
+  const withScheme = /^https?:\/\//i.test(raw) ? raw : `${/^(localhost|127\.0\.0\.1)(:|$)/.test(raw) ? 'http' : 'https'}://${raw}`;
+  try {
+    return new URL(withScheme).origin;
+  } catch {
+    console.warn('[auth] BETTER_AUTH_URL is not a valid address and is being ignored.');
+    return undefined;
+  }
+}
+
 // The app is reached on several hosts (localhost, the production domain, a new URL for every
 // Vercel preview), so the base URL comes from the request, limited to hosts we expect.
 function allowedHosts(): string[] {
   const hosts = ['localhost:3000', '127.0.0.1:3000'];
-  if (process.env.BETTER_AUTH_URL) hosts.push(new URL(process.env.BETTER_AUTH_URL).host);
+  const own = ownUrl();
+  if (own) hosts.push(new URL(own).host);
   for (const v of [process.env.VERCEL_URL, process.env.VERCEL_BRANCH_URL, process.env.VERCEL_PROJECT_PRODUCTION_URL]) {
     if (v) hosts.push(v);
   }
@@ -33,7 +49,7 @@ function allowedHosts(): string[] {
 export const auth = betterAuth({
   appName: 'Gym Tracker',
   database: pool,
-  baseURL: { allowedHosts: allowedHosts(), fallback: process.env.BETTER_AUTH_URL },
+  baseURL: { allowedHosts: allowedHosts(), fallback: ownUrl() },
   emailAndPassword: {
     enabled: true,
     minPasswordLength: 10,
