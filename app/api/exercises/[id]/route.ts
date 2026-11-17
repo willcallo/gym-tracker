@@ -1,3 +1,4 @@
+import { getUser, unauthorised } from '@/lib/session';
 import { deleteExercise, updateExercise } from '@/lib/db';
 import { badRequest, isPgError, parseId, serverError } from '@/lib/http';
 import { parseExerciseInput } from '@/lib/validate';
@@ -6,6 +7,7 @@ type Ctx = { params: Promise<{ id: string }> };
 
 export async function PUT(request: Request, { params }: Ctx) {
   try {
+    if (!(await getUser())) return unauthorised();
     const id = parseId((await params).id);
     if (id === null) return badRequest('Invalid exercise id');
     const parsed = parseExerciseInput(await request.json().catch(() => null));
@@ -23,6 +25,7 @@ export async function PUT(request: Request, { params }: Ctx) {
 
 export async function DELETE(_request: Request, { params }: Ctx) {
   try {
+    if (!(await getUser())) return unauthorised();
     const id = parseId((await params).id);
     if (id === null) return badRequest('Invalid exercise id');
     const result = await deleteExercise(id);

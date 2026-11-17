@@ -1,9 +1,11 @@
+import { getUser, unauthorised } from '@/lib/session';
 import { createExercise } from '@/lib/db';
 import { badRequest, isPgError, serverError } from '@/lib/http';
 import { parseExerciseInput } from '@/lib/validate';
 
 export async function POST(request: Request) {
   try {
+    if (!(await getUser())) return unauthorised();
     const parsed = parseExerciseInput(await request.json().catch(() => null));
     if (!parsed.ok) return badRequest(parsed.error);
     const exercise = await createExercise(parsed.value);

@@ -1,3 +1,4 @@
+import { getUser, unauthorised } from '@/lib/session';
 import { createSession, getSessionsPage } from '@/lib/db';
 import { badRequest, isPgError, parseId, serverError } from '@/lib/http';
 import { isValidDate, parseSessionInput } from '@/lib/validate';
@@ -5,6 +6,7 @@ import { isValidDate, parseSessionInput } from '@/lib/validate';
 // Cursor-paginated list for History's infinite scroll.
 export async function GET(request: Request) {
   try {
+    if (!(await getUser())) return unauthorised();
     const params = new URL(request.url).searchParams;
     const beforeDate = params.get('beforeDate');
     const beforeId = parseId(params.get('beforeId') ?? '');
@@ -23,6 +25,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    if (!(await getUser())) return unauthorised();
     const parsed = parseSessionInput(await request.json().catch(() => null));
     if (!parsed.ok) return badRequest(parsed.error);
     const id = await createSession(parsed.value);

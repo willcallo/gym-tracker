@@ -1,3 +1,4 @@
+import { getUser, unauthorised } from '@/lib/session';
 import { deleteSession, updateSession } from '@/lib/db';
 import { badRequest, isPgError, parseId, serverError } from '@/lib/http';
 import { parseSessionInput } from '@/lib/validate';
@@ -6,6 +7,7 @@ type Ctx = { params: Promise<{ id: string }> };
 
 export async function PUT(request: Request, { params }: Ctx) {
   try {
+    if (!(await getUser())) return unauthorised();
     const id = parseId((await params).id);
     if (id === null) return badRequest('Invalid session id');
     const parsed = parseSessionInput(await request.json().catch(() => null));
@@ -21,6 +23,7 @@ export async function PUT(request: Request, { params }: Ctx) {
 
 export async function DELETE(_request: Request, { params }: Ctx) {
   try {
+    if (!(await getUser())) return unauthorised();
     const id = parseId((await params).id);
     if (id === null) return badRequest('Invalid session id');
     const found = await deleteSession(id);

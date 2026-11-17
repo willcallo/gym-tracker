@@ -1,5 +1,6 @@
 export const dynamic = 'force-dynamic';
 
+import { requireUser } from '@/lib/session';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getExerciseDetail } from '@/lib/db';
@@ -10,6 +11,7 @@ import ProgressChart from './ProgressChart';
 import ExerciseEditor from './ExerciseEditor';
 
 export default async function ExerciseDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireUser();
   const id = parseId((await params).id);
   if (id === null) notFound();
   const detail = await getExerciseDetail(id);

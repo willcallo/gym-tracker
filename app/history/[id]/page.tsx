@@ -1,5 +1,6 @@
 export const dynamic = 'force-dynamic';
 
+import { requireUser } from '@/lib/session';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { getSession } from '@/lib/db';
@@ -11,6 +12,7 @@ import CoachingPanel from './CoachingPanel';
 import { aiEnabled } from '@/lib/ai';
 
 export default async function SessionPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireUser();
   const id = parseId((await params).id);
   if (id === null) notFound();
   const session = await getSession(id);
