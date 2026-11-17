@@ -556,7 +556,9 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
               type="date"
               value={form.date}
               onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
-              className={`${inputCls} min-w-0`}
+              // iOS gives date inputs a fixed intrinsic width that ignores the grid column, so the
+              // field spilled over the Label box. Dropping the native appearance lets it shrink.
+              className={`${inputCls} min-w-0 max-w-full appearance-none`}
             />
           </div>
           <div className="min-w-0">
