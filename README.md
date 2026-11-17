@@ -81,6 +81,20 @@ One exception, for the move to user accounts: a database that still has the tabl
 
 A database that still has tables from a much older version of this app needs `npm run db:reset` once, because `db:init` would keep the old shape.
 
+## iOS app
+
+The iOS app (`ios/`) is a Capacitor shell: a native app whose screen is this website, loaded from the address in `capacitor.config.ts`. A Vercel deploy therefore updates the app with no new build. Native-only features are added in the Xcode project.
+
+You need Xcode, selected with `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`.
+
+| Script | What it does |
+| --- | --- |
+| `npm run ios:sync` | Copies the config into the Xcode project, pointing the app at the production site. Run after changing `capacitor.config.ts` or adding a Capacitor plugin. |
+| `npm run ios:sync:dev` | The same, but pointing the app at `http://localhost:3000` (run `npm run dev` too). The simulator can reach your Mac's localhost; a real phone cannot. Run `ios:sync` again before building a release. |
+| `npm run ios:open` | Opens the project in Xcode. Press Run there to launch it in a simulator. |
+
+The bundle identifier is `com.willcallo.gymtracker` (`appId` in `capacitor.config.ts` and the Xcode project). It becomes permanent once a build is uploaded to TestFlight.
+
 ## Docker
 
 ```bash

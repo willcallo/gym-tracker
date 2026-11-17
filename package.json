@@ -12,10 +12,15 @@
     "db:init": "node scripts/db-init.mjs",
     "db:reset": "node scripts/db-reset.mjs",
     "db:seed": "node scripts/seed.mjs",
-    "test:isolation": "node scripts/test-isolation.mjs"
+    "test:isolation": "node scripts/test-isolation.mjs",
+    "ios:sync": "cap sync ios",
+    "ios:sync:dev": "CAP_SERVER_URL=http://localhost:3000 cap sync ios",
+    "ios:open": "cap open ios"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.105.0",
+    "@capacitor/core": "^8.6.0",
+    "@capacitor/ios": "^8.6.0",
     "better-auth": "^1.7.18",
     "next": "16.2.9",
     "pg": "^8.22.0",
@@ -24,6 +29,7 @@
     "recharts": "^3.8.1"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.6.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/pg": "^8.20.0",

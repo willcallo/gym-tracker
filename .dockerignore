@@ -17,6 +17,10 @@ gym.db-wal
 *.pem
 npm-debug.log*
 
+# Native iOS project — not part of the web image
+ios
+ios-shell
+
 # Git
 .git
 .gitignore
