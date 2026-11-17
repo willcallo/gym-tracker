@@ -34,7 +34,7 @@ npm run db:seed -- you@example.com   # optional: about 10 weeks of sample sessio
 | `npm run db:init` | Creates tables if missing. Idempotent and non-destructive. |
 | `npm run db:seed -- <email>` | Adds sample sessions to that account (sign up first). Refuses to run if the account already has sessions. |
 | `npm run db:reset` | Drops every app table (old and new) and recreates the schema. Destroys all data. Refuses to touch a non-local database unless you set `ALLOW_RESET=yes`. |
-| `npm run test:isolation` | With the app running, signs up two throwaway accounts and checks that neither can see or change the other's data through any route or page, then deletes them. `BASE_URL=https://... INVITE_CODE=...` points it at a deployed preview. Run it before merging anything that touches `lib/db.ts`. |
+| `npm run test:isolation` | With the app running, signs up two throwaway accounts and checks that neither can see or change the other's data through any route or page, then deletes them. `BASE_URL=https://... INVITE_CODE=...` points it at a deployed preview. Previews are behind Vercel's login wall, so also pass `VERCEL_BYPASS=...` with a Protection Bypass for Automation secret from the Vercel project's Deployment Protection settings. Run it before merging anything that touches `lib/db.ts`. |
 | `npm run dev:lan` | Dev server on `0.0.0.0` so a phone on your network can reach it. If Next blocks dev assets from your phone's address, add it to `allowedDevOrigins` in `next.config.ts`. |
 | `npm run lint` / `npm run build` | Lint and production build. |
 

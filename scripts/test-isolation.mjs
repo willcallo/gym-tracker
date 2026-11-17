@@ -7,6 +7,9 @@
 // It signs up two throwaway accounts (A and B) on the running app, gives A some data, then has B
 // try every API route and page against A's ids. Both accounts are deleted at the end. It needs
 // no database access, so it works against a deployed preview as well as localhost.
+// A Vercel preview sits behind Vercel's own login wall. To get the script through it, create a
+// "Protection Bypass for Automation" secret in the Vercel project (Settings > Deployment
+// Protection) and pass it as VERCEL_BYPASS=...
 // It never triggers a real AI request. Run it before merging anything that touches lib/db.ts.
 
 import path from 'node:path';
@@ -24,6 +27,7 @@ if (!process.env.INVITE_CODE) {
 
 const BASE = (process.env.BASE_URL ?? 'http://localhost:3000').replace(/\/$/, '');
 const INVITE_CODE = process.env.INVITE_CODE;
+const BYPASS = process.env.VERCEL_BYPASS ? { 'x-vercel-protection-bypass': process.env.VERCEL_BYPASS } : {};
 if (!INVITE_CODE) {
   console.error('INVITE_CODE is not set (export it or put it in .env.local).');
   process.exit(1);
@@ -46,7 +50,7 @@ function makeClient(label) {
   return {
     label,
     async request(method, pathname, body, extraHeaders = {}) {
-      const headers = { Origin: BASE, ...extraHeaders };
+      const headers = { Origin: BASE, ...BYPASS, ...extraHeaders };
       if (jar.size) headers.Cookie = [...jar].map(([k, v]) => `${k}=${v}`).join('; ');
       if (body !== undefined) headers['Content-Type'] = 'application/json';
       const res = await fetch(BASE + pathname, {
@@ -106,6 +110,22 @@ const CLIENT_KEY = `iso-key-${run}`;
 const leaks = (text) => text.includes(A_EXERCISE) || text.includes(A_LABEL);
 
 console.log(`Isolation test against ${BASE}\n`);
+{
+  // Fail early, with a useful message, if something other than the app answers.
+  const probe = await fetch(`${BASE}/api/sessions`, { headers: BYPASS, redirect: 'manual' }).catch((e) => e);
+  if (probe instanceof Error) {
+    console.error(`Could not reach ${BASE}: ${probe.message}. Is the app running?`);
+    process.exit(1);
+  }
+  if ((probe.headers.get('location') ?? '').includes('vercel.com/sso-api')) {
+    console.error(
+      'This deployment is behind Vercel Authentication, so the test cannot reach the app.\n' +
+        'Create a "Protection Bypass for Automation" secret in Vercel (Settings > Deployment Protection)\n' +
+        'and run again with VERCEL_BYPASS=<that secret>.'
+    );
+    process.exit(1);
+  }
+}
 let signedUp = [];
 try {
   await signUp(A, 'a');
