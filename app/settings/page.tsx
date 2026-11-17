@@ -11,7 +11,7 @@ export default async function SettingsPage() {
   return (
     <>
       <PageHeader title="Settings" />
-      <SettingsForm initial={settings} />
+      <SettingsForm initial={settings} email={user.email} />
     </>
   );
 }

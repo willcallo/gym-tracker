@@ -120,11 +120,7 @@ function loadDraft(
       const fresh = typeof d.savedAt === 'number' && Date.now() - d.savedAt < MAX_EDIT_DRAFT_AGE_MS;
       if (d.base !== baseSig || !fresh) {
         // Quietly: this runs during render, so no listener notifications.
-        try {
-          localStorage.removeItem(key);
-        } catch {
-          // ignore
-        }
+        clearDraft(key, true);
         return null;
       }
     }
