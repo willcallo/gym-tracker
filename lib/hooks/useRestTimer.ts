@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { isBeepUnlocked, playBeep, unlockBeep, vibrate } from '../beep';
+import { liveActivity } from '../native';
 
 const KEY = 'gym:rest';
 
@@ -64,6 +65,7 @@ function finish() {
   clearTimeout(timeout);
   store(null);
   set({ ...state, done: true });
+  liveActivity.rest(null);
   playBeep();
   vibrate();
 }
@@ -80,6 +82,9 @@ function init() {
   if (stored) {
     state = { active: true, done: false, endAt: stored.endAt, total: stored.total };
     schedule();
+  } else {
+    // A rest that ran out while the app was closed is still on the lock screen; clear it.
+    liveActivity.rest(null);
   }
   // Timers are throttled while the tab is hidden; catch up the moment it is visible again.
   document.addEventListener('visibilitychange', check);
@@ -97,6 +102,7 @@ export const restTimer = {
     const now = Date.now();
     store({ endAt: now + seconds * 1000, total: seconds });
     set({ active: true, done: false, endAt: now + seconds * 1000, total: seconds });
+    liveActivity.rest(now + seconds * 1000, seconds);
     schedule();
   },
   adjust(deltaSeconds: number) {
@@ -111,6 +117,7 @@ export const restTimer = {
     }
     store({ endAt, total });
     set({ active: true, done: false, endAt, total });
+    liveActivity.rest(endAt, total);
     schedule();
   },
   dismiss() {
@@ -118,6 +125,7 @@ export const restTimer = {
     clearTimeout(timeout);
     store(null);
     set(IDLE);
+    liveActivity.rest(null);
   },
 };
 

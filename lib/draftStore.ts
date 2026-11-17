@@ -1,6 +1,7 @@
 'use client';
 
 import { useSyncExternalStore } from 'react';
+import { liveActivity } from './native';
 
 export const NEW_DRAFT_KEY = 'gym:draft:new';
 export const editDraftKey = (id: number) => `gym:draft:edit:${id}`;
@@ -63,6 +64,7 @@ export function clearLocalData() {
   } catch {
     // ignore
   }
+  liveActivity.end();
   notify();
 }
 
@@ -98,6 +100,8 @@ export function pruneStaleNewDraft(quiet = false) {
   const raw = readDraft(NEW_DRAFT_KEY);
   if (raw === null || !isStaleBlankDraft(raw)) return;
   clearDraft(NEW_DRAFT_KEY, quiet);
+  // Not during render (quiet): the form that is opening starts a fresh lock-screen clock itself.
+  if (!quiet) liveActivity.end();
 }
 
 function draftIsLive(key: string, raw: string | null): boolean {

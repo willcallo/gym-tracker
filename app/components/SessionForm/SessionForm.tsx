@@ -19,6 +19,7 @@ import {
 } from '@/lib/draftStore';
 import { SET_TYPE_LETTERS, SET_TYPE_NAMES, capitalize, formatClock, formatSet, formatWeight, todayISO } from '@/lib/format';
 import { restTimer } from '@/lib/hooks/useRestTimer';
+import { liveActivity } from '@/lib/native';
 import { useWakeLock } from '@/lib/hooks/useWakeLock';
 import { SET_TYPES } from '@/lib/types';
 import type { ExerciseWithLast, SessionWithSets, SetType, SetValues, Settings } from '@/lib/types';
@@ -257,6 +258,11 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
     if (!edit && !init.restored && !hasContent(init.form)) restTimer.dismiss();
   }, [edit, init.restored, init.form]);
 
+  // In the iOS app, a new session's clock (and rest countdown) also shows on the lock screen.
+  useEffect(() => {
+    if (!edit) liveActivity.start(startedAt);
+  }, [edit, startedAt]);
+
   // ── Autosave ──────────────────────────────────────────────
   const savedRef = useRef(false);
   const formRef = useRef(form);
@@ -474,6 +480,7 @@ function FormInner({ exercises: initialExercises, settings, edit }: Props) {
       savedRef.current = true;
       clearDraft(draftKey);
       restTimer.dismiss();
+      if (!edit) liveActivity.end();
       router.push(`/history/${edit ? edit.session.id : data.id}`);
     } catch (e) {
       lastFailedRef.current = { key, body: contentSig };

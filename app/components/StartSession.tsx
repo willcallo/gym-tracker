@@ -5,6 +5,7 @@ import { ButtonLink } from './ui';
 import { DraftAge } from './Elapsed';
 import ConfirmButton from './ConfirmButton';
 import { restTimer } from '@/lib/hooks/useRestTimer';
+import { liveActivity } from '@/lib/native';
 import { NEW_DRAFT_KEY, clearDraft, pruneStaleNewDraft, useDraftStart, useHasDraft } from '@/lib/draftStore';
 
 export default function StartSession() {
@@ -40,6 +41,7 @@ export default function StartSession() {
         onConfirm={() => {
           clearDraft(NEW_DRAFT_KEY);
           restTimer.dismiss();
+          liveActivity.end();
         }}
         variant="secondary"
         className="w-full"
