@@ -1,8 +1,14 @@
 # Gym Tracker
 
-A mobile-first workout tracker for one person. Log sessions at the gym, watch your lifts progress, and optionally ask an AI for coaching. Next.js 16, Postgres (`pg`), Tailwind 4, Recharts, Anthropic SDK.
+A mobile-first workout tracker I built because I wanted something faster to use between sets than the apps I'd tried. I use it for my own training, logging every session at the gym on my phone.
 
-## Environment variables
+<!-- Screenshots: add phone screenshots to docs/screenshots/ and uncomment.
+<p>
+  <img src="docs/screenshots/home.png" width="240" alt="Home screen with week strip">
+  <img src="docs/screenshots/session.png" width="240" alt="Logging a session">
+  <img src="docs/screenshots/progress.png" width="240" alt="Exercise progress chart">
+</p>
+-->
 
 | Variable | Required | What it does |
 | --- | --- | --- |
@@ -15,9 +21,14 @@ A mobile-first workout tracker for one person. Log sessions at the gym, watch yo
 | `RESET_OLD_SCHEMA` | no | One-time switch. `yes` lets a build wipe a database left over from before user accounts. See "Schema changes are automatic". |
 | `AI_DAILY_LIMIT` | no | AI requests each account may make per day (default 20, resets at midnight UTC). The API key is shared by everyone, so this caps what one account can spend. |
 
-For local work put them in `.env.local`.
+- **Log a session fast.** Add exercises, enter weight and reps, and last session's numbers show as hints you can tap to accept. Sets can be marked as warm-up, drop set, or to failure.
+- **Rest timer and session timer.** The rest timer starts when you finish a set. The session clock keeps running through a locked screen and is saved as the session's duration.
+- **Never lose a workout.** Unsaved sessions autosave on the phone, and saves are safe to retry if the gym's signal drops, so a flaky connection can't create duplicate sessions.
+- **Track progress.** History of every session, plus a progress chart for each exercise.
+- **AI coaching, only when asked.** One tap gets feedback on a session or a summary of what to train next, written by Claude through the Anthropic API. Nothing runs automatically, which keeps API costs down.
+- **Private.** The whole app sits behind a password gate.
 
-## Run locally
+## Tech stack
 
 You need Node 20+ and a Postgres database.
 
@@ -38,19 +49,23 @@ npm run db:seed -- you@example.com   # optional: about 10 weeks of sample sessio
 | `npm run dev:lan` | Dev server on `0.0.0.0` so a phone on your network can reach it. If Next blocks dev assets from your phone's address, add it to `allowedDevOrigins` in `next.config.ts`. |
 | `npm run lint` / `npm run build` | Lint and production build. |
 
-The build needs no network: the Geist font is bundled in `app/fonts`.
+## How it fits together
 
-## Making changes: preview, test, ship
+- **Pages** live in `app/` (Home, Log, History, Exercises, Settings) and talk to **API routes** in `app/api/`, which validate input (`lib/validate.ts`) before anything touches the database.
+- **Data model** (`lib/schema.sql`): `sessions` contain `sets`, and each set points at an `exercises` row. Constraints in the database itself reject bad data (impossible rep counts, negative weights, unknown muscle groups) even if the app has a bug.
+- **Schema changes are automatic and additive.** The schema is applied on every deploy, and the init script refuses to run anything destructive (`DROP`, `DELETE`, and so on), so a deploy can't wipe data.
+- **Auth** (`proxy.ts`, `lib/auth.ts`): one shared password, compared in constant time, with a signed httpOnly cookie. If the password isn't configured in production the app refuses to serve data rather than running unprotected.
+- **Retry-safe saves**: each session carries a client-generated key with a unique index on it, so sending the same save twice creates one session, not two.
+- **AI** (`lib/ai.ts`): pulls recent sessions, sends them to Claude with a fixed prompt, and stores the result. Session coaching is flagged as out of date if you edit the session afterwards.
 
-**Start every change on a new, descriptively named branch from `master`** (for example `rest-timer-sound`), not by reusing an old branch. Each branch gets its own preview URL and its own pull request, so changes stay separate and you can ship them one at a time.
+## How I built it
 
 1. **Push the branch / open a PR.** Vercel builds a temporary preview site and posts its URL on the PR. The build runs `npm run vercel-build`, which applies the schema (`db:init`) to that preview's own database and then builds the app.
 2. **Test it on your phone** at the preview URL. The preview has its own copy of your production data (a Neon branch), so nothing you do there touches the real site. Sign-in applies to previews too.
 3. **Merge the PR into `master`** when you are happy. Vercel rebuilds from `master` with production settings, applies the schema to the production database, and deploys. That is how a change gets onto the main site.
 4. **Do not use "Promote to Production" on a preview.** It reuses the preview's build, environment variables and database. Merge instead. If a production deploy turns out to be bad, use Vercel's Instant Rollback: schema changes are additive, so the previous code keeps working.
 
-### Schema changes are automatic, so keep them safe
-`lib/schema.sql` runs on every Vercel build (previews and production) and on container start. It must stay additive and idempotent: `CREATE ... IF NOT EXISTS`, `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, new columns nullable or with defaults. `npm run db:init` refuses to run if the file contains `DROP`, `TRUNCATE`, `RENAME`, `ALTER COLUMN`, `UPDATE ... SET` or `DELETE FROM`. A destructive change needs a deliberate manual migration, not an edit to this file.
+## Running it yourself
 
 One exception, for the move to user accounts: a database that still has the tables from before accounts existed cannot be upgraded in place, so the build stops with a message. Setting `RESET_OLD_SCHEMA=yes` for that environment lets the next build delete those old tables and create the new ones. It only ever acts on a pre-accounts database, so it does nothing once the upgrade has happened; remove it afterwards anyway.
 
