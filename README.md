@@ -12,6 +12,7 @@ A mobile-first workout tracker for one person. Log sessions at the gym, watch yo
 | `INVITE_CODE` | yes | The code a new person must enter to create an account. With it unset nobody can sign up. Change it to stop further sign-ups with the old code; existing accounts are unaffected. |
 | `BETTER_AUTH_URL` | locally | The app's own address, `http://localhost:3000` for local work, your production URL on Vercel. Vercel preview URLs are allowed automatically. `AUTH_ALLOWED_HOSTS` (comma-separated `host:port`) adds more, such as your computer's LAN address for `npm run dev:lan`. |
 | `ANTHROPIC_API_KEY` | no | Enables the AI buttons. Without it they are disabled with a short explanation. |
+| `RESET_OLD_SCHEMA` | no | One-time switch. `yes` lets a build wipe a database left over from before user accounts. See "Schema changes are automatic". |
 | `AI_DAILY_LIMIT` | no | AI requests each account may make per day (default 20, resets at midnight UTC). The API key is shared by everyone, so this caps what one account can spend. |
 
 For local work put them in `.env.local`.
@@ -50,6 +51,8 @@ The build needs no network: the Geist font is bundled in `app/fonts`.
 
 ### Schema changes are automatic, so keep them safe
 `lib/schema.sql` runs on every Vercel build (previews and production) and on container start. It must stay additive and idempotent: `CREATE ... IF NOT EXISTS`, `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, new columns nullable or with defaults. `npm run db:init` refuses to run if the file contains `DROP`, `TRUNCATE`, `RENAME`, `ALTER COLUMN`, `UPDATE ... SET` or `DELETE FROM`. A destructive change needs a deliberate manual migration, not an edit to this file.
+
+One exception, for the move to user accounts: a database that still has the tables from before accounts existed cannot be upgraded in place, so the build stops with a message. Setting `RESET_OLD_SCHEMA=yes` for that environment lets the next build delete those old tables and create the new ones. It only ever acts on a pre-accounts database, so it does nothing once the upgrade has happened; remove it afterwards anyway.
 
 ### One-time setup (Vercel + Neon)
 1. In Neon, create a project. In Vercel, import this repo and set **Production Branch** to `master`.

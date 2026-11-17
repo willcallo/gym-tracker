@@ -40,6 +40,13 @@ export function assertAdditiveSchema(sql) {
   }
 }
 
+// Every table this app has ever used (old and new shapes).
+export const APP_TABLES = [
+  'sets', 'sessions', 'exercises', 'settings', 'training_summary', 'ai_usage', 'user_settings', 'dashboard_cache',
+  // Auth tables. Quoted: "user" is a reserved word and Better Auth's names are case-sensitive.
+  '"rateLimit"', '"verification"', '"account"', '"session"', '"user"',
+];
+
 export function readSchema() {
   return fs.readFileSync(path.join(root, 'lib', 'schema.sql'), 'utf8');
 }

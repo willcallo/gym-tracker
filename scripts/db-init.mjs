@@ -1,4 +1,4 @@
-import { connect, readSchema, assertAdditiveSchema } from './_db.mjs';
+import { connect, readSchema, assertAdditiveSchema, APP_TABLES } from './_db.mjs';
 
 const schema = readSchema();
 assertAdditiveSchema(schema);
@@ -22,12 +22,21 @@ try {
        )`
   );
   if (old.length) {
-    console.error(
-      'This database has tables from before user accounts (sessions has no user_id column). ' +
-        'They cannot be upgraded in place. Run `ALLOW_RESET=yes npm run db:reset` against it once, ' +
-        'which deletes all data, then deploy again.'
-    );
-    process.exit(1);
+    // The one case where this script deletes anything, and only when asked: RESET_OLD_SCHEMA=yes
+    // wipes a pre-accounts database so the new schema can be created. It cannot touch a database
+    // that already has the new shape, because this branch is only reached for the old one, so
+    // leaving the variable set afterwards is harmless.
+    if (process.env.RESET_OLD_SCHEMA !== 'yes') {
+      console.error(
+        'This database has tables from before user accounts (sessions has no user_id column). ' +
+          'They cannot be upgraded in place. To delete all of its data and start fresh, set the ' +
+          'environment variable RESET_OLD_SCHEMA=yes and deploy again (or run ' +
+          '`ALLOW_RESET=yes npm run db:reset` against it).'
+      );
+      process.exit(1);
+    }
+    console.warn('RESET_OLD_SCHEMA=yes: this database predates user accounts. Deleting all of its tables.');
+    for (const t of APP_TABLES) await client.query(`DROP TABLE IF EXISTS ${t} CASCADE`);
   }
   await client.query(schema);
   await client.query('COMMIT');
