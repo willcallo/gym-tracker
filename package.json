@@ -12,6 +12,7 @@
     "db:init": "node scripts/db-init.mjs",
     "db:reset": "node scripts/db-reset.mjs",
     "db:seed": "node scripts/seed.mjs",
+    "db:import": "node scripts/import-workouts.mjs",
     "test:isolation": "node scripts/test-isolation.mjs",
     "ios:sync": "cap sync ios",
     "ios:sync:dev": "CAP_SERVER_URL=http://localhost:3000 cap sync ios",
